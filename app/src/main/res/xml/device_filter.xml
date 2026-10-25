@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- CANable slcan firmware, ad50:60c4 -->
+    <usb-device vendor-id="44368" product-id="24772" />
+</resources>

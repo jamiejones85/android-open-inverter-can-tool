@@ -1,0 +1,29 @@
+# Built application files
+*.apk
+*.aab
+*.apex
+
+# Files for the JVM target
+*.class
+
+# Generated files
+bin/
+gen/
+out/
+
+# Gradle files
+.gradle/
+build/
+
+# Local configuration file (sdk path, etc.)
+local.properties
+
+# IDE files
+.idea/
+.DS_Store
+.kotlin/
+
+# Signing files (Never commit keystores!)
+*.keystore
+*.jks
+key.properties
