@@ -6,14 +6,14 @@ plugins {
 }
 
 android {
-    namespace = "uk.co.mudslidedesign.oicantool"
+    namespace = "app.oic"
     compileSdk = 36
     defaultConfig {
         applicationId = "uk.co.mudslidedesign.oicantool"
         minSdk = 24
         targetSdk = 36
-        versionCode = 5
-        versionName = "0.5"
+        versionCode = 6
+        versionName = "0.6"
     }
     signingConfigs {
         create("release") {

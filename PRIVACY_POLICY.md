@@ -8,7 +8,7 @@ OI Can Tool ("we", "our", or "us") is committed to protecting your privacy. This
 **We do not collect, store, or transmit any personal data or vehicle/device data off your device.**
 
 - **Local Operation**: All parameter tuning, live monitoring, data logging, and firmware flashing operations occur strictly locally on your device and communicate solely with your connected USB/CAN hardware adapter.
-- **In-App Purchases**: Optional in-app donations (£2.00) are processed securely by Google Play Billing. We do not receive, collect, or store your payment details, billing address, or financial information.
+- **In-App Purchases**: Optional in-app donations (£5.00) are processed securely by Google Play Billing. We do not receive, collect, or store your payment details, billing address, or financial information.
 - **Permissions**: The app requests USB host access solely to communicate with your connected CAN bus hardware. 
 
 ### Contact Us

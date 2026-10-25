@@ -47,7 +47,7 @@ class BillingManager(context: Context) : PurchasesUpdatedListener {
             client.queryPurchasesAsync(params, PurchasesResponseListener { result, purchases ->
                 if (result.responseCode == BillingClient.BillingResponseCode.OK && purchases != null) {
                     val donated = purchases.any { purchase ->
-                        purchase.products.contains("donate_2_gbp") && purchase.purchaseState == Purchase.PurchaseState.PURCHASED
+                        purchase.products.contains("donate_5_gbp") && purchase.purchaseState == Purchase.PurchaseState.PURCHASED
                     }
                     if (donated) {
                         setDonated(true)
@@ -60,7 +60,7 @@ class BillingManager(context: Context) : PurchasesUpdatedListener {
     override fun onPurchasesUpdated(result: BillingResult, purchases: List<Purchase>?) {
         if (result.responseCode == BillingClient.BillingResponseCode.OK && purchases != null) {
             for (purchase in purchases) {
-                if (purchase.products.contains("donate_2_gbp") && purchase.purchaseState == Purchase.PurchaseState.PURCHASED) {
+                if (purchase.products.contains("donate_5_gbp") && purchase.purchaseState == Purchase.PurchaseState.PURCHASED) {
                     setDonated(true)
                     if (!purchase.isAcknowledged) {
                         val ackParams = AcknowledgePurchaseParams.newBuilder()
@@ -83,7 +83,7 @@ class BillingManager(context: Context) : PurchasesUpdatedListener {
             val client = billingClient ?: return
             val productList = listOf(
                 QueryProductDetailsParams.Product.newBuilder()
-                    .setProductId("donate_2_gbp")
+                    .setProductId("donate_5_gbp")
                     .setProductType(BillingClient.ProductType.INAPP)
                     .build()
             )

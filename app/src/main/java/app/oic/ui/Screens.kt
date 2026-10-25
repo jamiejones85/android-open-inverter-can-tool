@@ -142,12 +142,12 @@ private fun DeviceScreen(ui: Ui, vm: MainViewModel) {
                             Icon(Icons.Filled.Favorite, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
                             Text("Support Development", style = MaterialTheme.typography.titleMedium)
                         }
-                        Text("Enjoying OI Can Tool? Donate £2.00 to support ongoing development and remove this banner.", style = MaterialTheme.typography.bodySmall)
+                        Text("Enjoying OI Can Tool? Donate £5.00 to support ongoing development and remove this banner.", style = MaterialTheme.typography.bodySmall)
                         Button(
                             onClick = { activity?.let { vm.donate(it) } },
                             modifier = Modifier.fillMaxWidth()
                         ) {
-                            Text("Donate £2.00 & Remove Banner")
+                            Text("Donate £5.00 & Remove Banner")
                         }
                     }
                 }
