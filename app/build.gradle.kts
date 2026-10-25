@@ -6,14 +6,14 @@ plugins {
 }
 
 android {
-    namespace = "app.oic"
-    compileSdk = 35
+    namespace = "uk.co.mudslidedesign.oicantool"
+    compileSdk = 36
     defaultConfig {
-        applicationId = "app.oic"
+        applicationId = "uk.co.mudslidedesign.oicantool"
         minSdk = 24
-        targetSdk = 35
-        versionCode = 1
-        versionName = "0.1"
+        targetSdk = 36
+        versionCode = 4
+        versionName = "0.4"
     }
     signingConfigs {
         create("release") {
@@ -45,7 +45,7 @@ android {
 
 dependencies {
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.5")
-    implementation("com.android.billingclient:billing-ktx:6.2.1")
+    implementation("com.android.billingclient:billing-ktx:8.0.0")
     implementation(platform("androidx.compose:compose-bom:2024.09.00"))
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.material3:material3")

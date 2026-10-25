@@ -14,7 +14,7 @@ class BillingManager(context: Context) : PurchasesUpdatedListener {
 
     private val billingClient = BillingClient.newBuilder(context)
         .setListener(this)
-        .enablePendingPurchases()
+        .enablePendingPurchases(PendingPurchasesParams.newBuilder().enableOneTimeProducts().build())
         .build()
 
     init {
@@ -38,8 +38,8 @@ class BillingManager(context: Context) : PurchasesUpdatedListener {
         val params = QueryPurchasesParams.newBuilder()
             .setProductType(BillingClient.ProductType.INAPP)
             .build()
-        billingClient.queryPurchasesAsync(params) { result, purchases ->
-            if (result.responseCode == BillingClient.BillingResponseCode.OK) {
+        billingClient.queryPurchasesAsync(params, PurchasesResponseListener { result, purchases ->
+            if (result.responseCode == BillingClient.BillingResponseCode.OK && purchases != null) {
                 val donated = purchases.any { purchase ->
                     purchase.products.contains("donate_2_gbp") && purchase.purchaseState == Purchase.PurchaseState.PURCHASED
                 }
@@ -47,7 +47,7 @@ class BillingManager(context: Context) : PurchasesUpdatedListener {
                     setDonated(true)
                 }
             }
-        }
+        })
     }
 
     override fun onPurchasesUpdated(result: BillingResult, purchases: List<Purchase>?) {
@@ -59,7 +59,7 @@ class BillingManager(context: Context) : PurchasesUpdatedListener {
                         val ackParams = AcknowledgePurchaseParams.newBuilder()
                             .setPurchaseToken(purchase.purchaseToken)
                             .build()
-                        billingClient.acknowledgePurchase(ackParams) { _ -> }
+                        billingClient.acknowledgePurchase(ackParams, AcknowledgePurchaseResponseListener { _ -> })
                     }
                 }
             }
@@ -79,9 +79,10 @@ class BillingManager(context: Context) : PurchasesUpdatedListener {
                 .build()
         )
         val params = QueryProductDetailsParams.newBuilder().setProductList(productList).build()
-        billingClient.queryProductDetailsAsync(params) { result, productDetailsList ->
-            if (result.responseCode == BillingClient.BillingResponseCode.OK && !productDetailsList.isNullOrEmpty()) {
-                val productDetails = productDetailsList[0]
+        billingClient.queryProductDetailsAsync(params, ProductDetailsResponseListener { result, productDetailsList ->
+            val list = productDetailsList as? List<ProductDetails>
+            if (result.responseCode == BillingClient.BillingResponseCode.OK && !list.isNullOrEmpty()) {
+                val productDetails = list[0]
                 val productDetailsParamsList = listOf(
                     BillingFlowParams.ProductDetailsParams.newBuilder()
                         .setProductDetails(productDetails)
@@ -92,6 +93,6 @@ class BillingManager(context: Context) : PurchasesUpdatedListener {
                     .build()
                 billingClient.launchBillingFlow(activity, billingFlowParams)
             }
-        }
+        })
     }
 }
