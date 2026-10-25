@@ -12,8 +12,8 @@ android {
         applicationId = "uk.co.mudslidedesign.oicantool"
         minSdk = 24
         targetSdk = 36
-        versionCode = 6
-        versionName = "0.6"
+        versionCode = 7
+        versionName = "0.7"
     }
     signingConfigs {
         create("release") {
@@ -28,6 +28,9 @@ android {
             signingConfig = signingConfigs.getByName("release")
             isMinifyEnabled = true
             isShrinkResources = true
+            ndk {
+                debugSymbolLevel = "FULL"
+            }
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
