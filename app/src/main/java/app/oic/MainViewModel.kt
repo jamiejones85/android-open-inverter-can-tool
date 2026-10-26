@@ -396,13 +396,17 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         canLogJob = viewModelScope.launch(Dispatchers.IO) {
             try {
                 ctx.contentResolver.openOutputStream(uri, "w")?.bufferedWriter()?.use { writer ->
+                    writer.write("Time Stamp,ID,Extended,Dir,Bus,LEN,D1,D2,D3,D4,D5,D6,D7,D8\n")
+                    writer.flush()
                     _ui.update { it.copy(logging = true, logRows = 0) }
                     var count = 0
                     val startTime = System.currentTimeMillis()
                     adapter.frames.collect { f ->
                         val timestamp = (System.currentTimeMillis() - startTime) / 1000.0
-                        val hexData = f.data.joinToString(" ") { "%02X".format(it) }
-                        val line = "%.4f 1 %03X [%d] %s\n".format(timestamp, f.id, f.data.size, hexData)
+                        val idHex = "%08X".format(f.id)
+                        val extStr = if (f.extended) "true" else "false"
+                        val dataBytes = Array(8) { i -> if (i < f.data.size) "%02X".format(f.data[i]) else "00" }
+                        val line = "%.3f,%s,%s,Rx,0,%d,%s,\n".format(timestamp, idHex, extStr, f.data.size, dataBytes.joinToString(","))
                         writer.write(line)
                         writer.flush()
                         count++
@@ -417,7 +421,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 _ui.update { it.copy(logging = false) }
             }
         }
-        toast("SavvyCAN streaming log started")
+        toast("CAN CSV logging started")
     }
 
     fun stopCanLog() {
