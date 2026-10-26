@@ -109,6 +109,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     fun setNode(id: Int) {
         sdo.nodeId = id.coerceIn(1, 127)
         _ui.update { it.copy(nodeId = sdo.nodeId, serial = null) }
+        if (_ui.value.connected) {
+            loadDb()
+        }
     }
 
     fun connect() {
@@ -134,6 +137,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 withContext(Dispatchers.IO) { adapter.open(dev, _ui.value.bitrate) }
                 val label = BITRATES[_ui.value.bitrate]
                 _ui.update { it.copy(connected = true, status = "Connected, $label bit/s, normal mode") }
+                loadDb()
             } catch (e: Exception) {
                 toast(e.message ?: "Could not open adapter")
             }
