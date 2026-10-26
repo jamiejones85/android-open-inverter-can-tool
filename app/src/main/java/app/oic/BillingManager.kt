@@ -32,7 +32,7 @@ class BillingManager(context: Context) : PurchasesUpdatedListener {
                     }
                 }
                 override fun onBillingServiceDisconnected() {
-                    // ignore
+                    startConnection()
                 }
             })
         }
@@ -78,31 +78,38 @@ class BillingManager(context: Context) : PurchasesUpdatedListener {
         _hasDonated.value = donated
     }
 
-    fun launchBilling(activity: Activity) {
-        runCatching {
-            val client = billingClient ?: return
-            val productList = listOf(
-                QueryProductDetailsParams.Product.newBuilder()
-                    .setProductId("donate_5_gbp")
-                    .setProductType(BillingClient.ProductType.INAPP)
-                    .build()
-            )
-            val params = QueryProductDetailsParams.newBuilder().setProductList(productList).build()
-            client.queryProductDetailsAsync(params, ProductDetailsResponseListener { result, productDetailsList ->
-                val list = productDetailsList as? List<ProductDetails>
-                if (result.responseCode == BillingClient.BillingResponseCode.OK && !list.isNullOrEmpty()) {
-                    val productDetails = list[0]
-                    val productDetailsParamsList = listOf(
-                        BillingFlowParams.ProductDetailsParams.newBuilder()
-                            .setProductDetails(productDetails)
-                            .build()
-                    )
-                    val billingFlowParams = BillingFlowParams.newBuilder()
-                        .setProductDetailsParamsList(productDetailsParamsList)
-                        .build()
-                    client.launchBillingFlow(activity, billingFlowParams)
-                }
-            })
+    fun launchBilling(activity: Activity, onMessage: (String) -> Unit) {
+        val client = billingClient
+        if (client == null) {
+            onMessage("Google Play Billing not available on this device")
+            return
         }
+        val productList = listOf(
+            QueryProductDetailsParams.Product.newBuilder()
+                .setProductId("donate_5_gbp")
+                .setProductType(BillingClient.ProductType.INAPP)
+                .build()
+        )
+        val params = QueryProductDetailsParams.newBuilder().setProductList(productList).build()
+        client.queryProductDetailsAsync(params, ProductDetailsResponseListener { result, productDetailsList ->
+            val list = productDetailsList as? List<ProductDetails>
+            if (result.responseCode == BillingClient.BillingResponseCode.OK && !list.isNullOrEmpty()) {
+                val productDetails = list[0]
+                val productDetailsParamsList = listOf(
+                    BillingFlowParams.ProductDetailsParams.newBuilder()
+                        .setProductDetails(productDetails)
+                        .build()
+                )
+                val billingFlowParams = BillingFlowParams.newBuilder()
+                    .setProductDetailsParamsList(productDetailsParamsList)
+                    .build()
+                val flowResult = client.launchBillingFlow(activity, billingFlowParams)
+                if (flowResult.responseCode != BillingClient.BillingResponseCode.OK) {
+                    onMessage("Billing error: ${flowResult.debugMessage}")
+                }
+            } else {
+                onMessage("Donation product not found (${result.responseCode}). Make sure app is installed via Play Store testing track.")
+            }
+        })
     }
 }

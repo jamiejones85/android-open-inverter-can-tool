@@ -61,7 +61,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     val hasDonated = billing.hasDonated
 
     fun donate(activity: Activity) {
-        billing.launchBilling(activity)
+        billing.launchBilling(activity) { msg ->
+            toast(msg)
+        }
     }
 
     private val _ui = MutableStateFlow(Ui())
