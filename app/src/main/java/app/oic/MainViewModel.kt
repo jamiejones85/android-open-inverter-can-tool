@@ -60,7 +60,12 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private val billing = BillingManager(ctx)
     val hasDonated = billing.hasDonated
 
-    fun donate(activity: Activity) {
+    fun donate(context: Context) {
+        val activity = context.findActivity()
+        if (activity == null) {
+            toast("Could not open billing window")
+            return
+        }
         billing.launchBilling(activity) { msg ->
             toast(msg)
         }
@@ -423,4 +428,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         canLogJob?.cancel()
         adapter.close()
     }
+}
+
+tailrec fun Context.findActivity(): Activity? = when (this) {
+    is Activity -> this
+    is android.content.ContextWrapper -> baseContext.findActivity()
+    else -> null
 }

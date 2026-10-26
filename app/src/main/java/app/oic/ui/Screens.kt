@@ -128,7 +128,7 @@ private fun DeviceScreen(ui: Ui, vm: MainViewModel) {
     var mode by remember { mutableStateOf("Normal") }
     var nodeText by remember(ui.nodeId) { mutableStateOf(ui.nodeId.toString()) }
     val hasDonated by vm.hasDonated.collectAsStateWithLifecycle()
-    val activity = LocalContext.current as? Activity
+    val context = LocalContext.current
 
     confirm?.let { (msg, act) -> Confirm(msg, act) { confirm = null } }
 
@@ -146,7 +146,7 @@ private fun DeviceScreen(ui: Ui, vm: MainViewModel) {
                         }
                         Text("Enjoying OI Can Tool? Donate £5.00 to support ongoing development and remove this banner.", style = MaterialTheme.typography.bodySmall)
                         Button(
-                            onClick = { activity?.let { vm.donate(it) } },
+                            onClick = { vm.donate(context) },
                             modifier = Modifier.fillMaxWidth()
                         ) {
                             Text("Donate £5.00 & Remove Banner")
