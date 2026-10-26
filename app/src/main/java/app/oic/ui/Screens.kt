@@ -716,6 +716,52 @@ private fun ToolsScreen(ui: Ui, vm: MainViewModel) {
             ) {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Icon(Icons.Filled.Settings, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                        Text("CAN Adapter", style = MaterialTheme.typography.titleMedium)
+                    }
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
+                    
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Surface(
+                            shape = CircleShape,
+                            color = if (ui.connected) Color(0xFF10B981) else Color(0xFF6B7280),
+                            modifier = Modifier.size(10.dp)
+                        ) {}
+                        Text(ui.status, style = MaterialTheme.typography.bodyMedium)
+                    }
+
+                    FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        MainViewModel.BITRATES.forEach { (code, label) ->
+                            FilterChip(
+                                selected = ui.bitrate == code,
+                                onClick = { vm.setBitrate(code) },
+                                label = { Text(label) },
+                                enabled = !ui.connected
+                            )
+                        }
+                    }
+
+                    Button(
+                        onClick = { if (ui.connected) vm.disconnect() else vm.connect() },
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = if (ui.connected) ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error) else ButtonDefaults.buttonColors()
+                    ) {
+                        Text(if (ui.connected) "Disconnect Adapter" else "Connect Adapter")
+                    }
+                }
+            }
+        }
+        item {
+            ElevatedCard(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.elevatedCardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+            ) {
+                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         Icon(Icons.Filled.Build, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
                         Text("SavvyCAN Bus Logger", style = MaterialTheme.typography.titleMedium)
                     }
