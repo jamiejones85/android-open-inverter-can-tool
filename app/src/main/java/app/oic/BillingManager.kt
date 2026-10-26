@@ -41,6 +41,7 @@ class BillingManager(context: Context) : PurchasesUpdatedListener {
     private fun queryPurchases() {
         runCatching {
             val client = billingClient ?: return
+            if (!client.isReady) return
             val params = QueryPurchasesParams.newBuilder()
                 .setProductType(BillingClient.ProductType.INAPP)
                 .build()
@@ -81,7 +82,12 @@ class BillingManager(context: Context) : PurchasesUpdatedListener {
     fun launchBilling(activity: Activity, onMessage: (String) -> Unit) {
         val client = billingClient
         if (client == null) {
-            onMessage("Google Play Billing not available on this device")
+            onMessage("Google Play Billing not available")
+            return
+        }
+        if (!client.isReady) {
+            onMessage("Connecting to Google Play... Please try again in a moment.")
+            startConnection()
             return
         }
         val productList = listOf(
@@ -108,7 +114,7 @@ class BillingManager(context: Context) : PurchasesUpdatedListener {
                     onMessage("Billing error: ${flowResult.debugMessage}")
                 }
             } else {
-                onMessage("Donation product not found (${result.responseCode}). Make sure app is installed via Play Store testing track.")
+                onMessage("Product not found (${result.responseCode}). Check Play Console product activation.")
             }
         })
     }
