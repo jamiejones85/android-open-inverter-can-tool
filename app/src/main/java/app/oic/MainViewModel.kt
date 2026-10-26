@@ -376,8 +376,49 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    private var canLogJob: Job? = null
+
+    fun startCanLog(uri: Uri) {
+        if (!ui.value.connected) return toast("Connect the adapter first")
+        stopPolling()
+
+        canLogJob = viewModelScope.launch(Dispatchers.IO) {
+            try {
+                ctx.contentResolver.openOutputStream(uri, "w")?.bufferedWriter()?.use { writer ->
+                    _ui.update { it.copy(logging = true, logRows = 0) }
+                    var count = 0
+                    val startTime = System.currentTimeMillis()
+                    adapter.frames.collect { f ->
+                        val timestamp = (System.currentTimeMillis() - startTime) / 1000.0
+                        val hexData = f.data.joinToString(" ") { "%02X".format(it) }
+                        val line = "%.4f 1 %03X [%d] %s\n".format(timestamp, f.id, f.data.size, hexData)
+                        writer.write(line)
+                        writer.flush()
+                        count++
+                        if (count % 50 == 0) {
+                            _ui.update { it.copy(logRows = count) }
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                toast("Logging error: ${e.message}")
+            } finally {
+                _ui.update { it.copy(logging = false) }
+            }
+        }
+        toast("SavvyCAN streaming log started")
+    }
+
+    fun stopCanLog() {
+        canLogJob?.cancel()
+        canLogJob = null
+        _ui.update { it.copy(logging = false) }
+        toast("SavvyCAN streaming log stopped")
+    }
+
     override fun onCleared() {
         pollJob?.cancel()
+        canLogJob?.cancel()
         adapter.close()
     }
 }

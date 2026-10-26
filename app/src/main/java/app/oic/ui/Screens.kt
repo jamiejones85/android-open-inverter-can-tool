@@ -55,7 +55,8 @@ private val TABS = listOf(
     TabDef("Params", Icons.Filled.Settings),
     TabDef("Live", Icons.Filled.Info),
     TabDef("CAN map", Icons.Filled.List),
-    TabDef("Files", Icons.Filled.Menu)
+    TabDef("Files", Icons.Filled.Menu),
+    TabDef("Tools", Icons.Filled.Build)
 )
 
 private fun LazyListScope.col(key: Any? = null, content: @Composable ColumnScope.() -> Unit) {
@@ -89,7 +90,8 @@ fun OicApp(vm: MainViewModel) {
                 1 -> ParamsScreen(ui, vm)
                 2 -> LiveScreen(ui, vm)
                 3 -> MapScreen(ui, vm)
-                else -> FilesScreen(ui, vm)
+                4 -> FilesScreen(ui, vm)
+                else -> ToolsScreen(ui, vm)
             }
         }
     }
@@ -695,5 +697,53 @@ private fun FilesScreen(ui: Ui, vm: MainViewModel) {
         Text("Parameter database", style = MaterialTheme.typography.titleMedium)
         Text("Current: ${ui.dbSource}")
         OutlinedButton(onClick = { dbFile.launch(arrayOf("application/json", "*/*")) }) { Text("Use database file instead") }
+    }
+}
+
+// ---------------------------------------------------------------- Tools
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun ToolsScreen(ui: Ui, vm: MainViewModel) {
+    val logPicker = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("text/plain")) { u: Uri? ->
+        if (u != null) vm.startCanLog(u)
+    }
+
+    LazyColumn(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+        item {
+            ElevatedCard(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.elevatedCardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+            ) {
+                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Icon(Icons.Filled.Build, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                        Text("SavvyCAN Bus Logger", style = MaterialTheme.typography.titleMedium)
+                    }
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
+                    Text("Streams raw CAN frames directly to storage in SavvyCAN ASCII format without buffering.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+
+                    if (ui.logging) {
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Text("Status: Streaming live... (${ui.logRows} frames captured)", style = MaterialTheme.typography.bodyMedium, color = Color(0xFF10B981), fontFamily = FontFamily.Monospace)
+                            Button(
+                                onClick = vm::stopCanLog,
+                                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Text("Stop Logging")
+                            }
+                        }
+                    } else {
+                        Button(
+                            onClick = { logPicker.launch("savvycan-log.txt") },
+                            enabled = ui.connected,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text("Start SavvyCAN Stream to File")
+                        }
+                    }
+                }
+            }
+        }
     }
 }
