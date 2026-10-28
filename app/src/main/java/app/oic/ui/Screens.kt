@@ -555,7 +555,7 @@ private fun LiveScreen(ui: Ui, vm: MainViewModel) = NeedDb(ui, vm) {
     val items = remember(db, query) { db.params.filter { it.name.contains(query, ignoreCase = true) } }
 
     if (showGraph) {
-        LiveGraphDialog(vm, onDismiss = { showGraph = false }, onSaveSvg = { svgPicker.launch("can-graph.svg") })
+        LiveGraphDialog(ui, vm, selected.toList(), onDismiss = { showGraph = false }, onSaveSvg = { svgPicker.launch("can-graph.svg") })
     }
 
     Column(Modifier.fillMaxSize()) {
@@ -596,18 +596,32 @@ private fun LiveScreen(ui: Ui, vm: MainViewModel) = NeedDb(ui, vm) {
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun LiveGraphDialog(vm: MainViewModel, onDismiss: () -> Unit, onSaveSvg: () -> Unit) {
+private fun LiveGraphDialog(ui: Ui, vm: MainViewModel, selected: List<String>, onDismiss: () -> Unit, onSaveSvg: () -> Unit) {
     val history by vm.graphHistory.collectAsStateWithLifecycle()
+
+    LaunchedEffect(Unit) {
+        if (!ui.polling && selected.isNotEmpty()) {
+            vm.startPolling(selected, 1000, null)
+        }
+    }
 
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Live Parameter Graph") },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth().height(350.dp)) {
-                if (history.isEmpty() || history.values.all { it.size < 2 }) {
-                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        Text("Start polling to record graph data...", style = MaterialTheme.typography.bodyMedium)
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth().fillMaxHeight(0.7f)) {
+                Row(horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Text(if (ui.polling) "Status: Polling live..." else "Status: Paused", style = MaterialTheme.typography.bodySmall, color = if (ui.polling) Color(0xFF10B981) else MaterialTheme.colorScheme.onSurfaceVariant)
+                    Button(onClick = { if (ui.polling) vm.stopPolling() else vm.startPolling(selected, 1000, null) }, contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)) {
+                        Text(if (ui.polling) "Pause" else "Resume")
+                    }
+                }
+
+                if (history.isEmpty() || history.values.all { it.size < 1 }) {
+                    Box(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
+                        Text("Collecting live data...", style = MaterialTheme.typography.bodyMedium)
                     }
                 } else {
                     val colors = listOf(Color(0xFF5EEAD4), Color(0xFF38BDF8), Color(0xFFF43F5E), Color(0xFFFBBF24), Color(0xFFA855F7), Color(0xFF34D399))
@@ -631,9 +645,15 @@ private fun LiveGraphDialog(vm: MainViewModel, onDismiss: () -> Unit, onSaveSvg:
                         if (minX == maxX) maxX = minX + 1.0
                         if (minY == maxY) { minY -= 1.0; maxY += 1.0 }
 
+                        val gridColor = Color.DarkGray.copy(alpha = 0.3f)
+                        for (i in 0..4) {
+                            val gy = (canvasHeight / 4f) * i
+                            drawLine(color = gridColor, start = androidx.compose.ui.geometry.Offset(0f, gy), end = androidx.compose.ui.geometry.Offset(canvasWidth, gy), strokeWidth = 1f)
+                        }
+
                         var colorIdx = 0
                         for ((_, points) in history) {
-                            if (points.size < 2) continue
+                            if (points.isEmpty()) continue
                             val color = colors[colorIdx % colors.size]
                             colorIdx++
 
@@ -647,13 +667,16 @@ private fun LiveGraphDialog(vm: MainViewModel, onDismiss: () -> Unit, onSaveSvg:
                         }
                     }
 
-                    // Legend
-                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth()) {
+                    FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
                         history.keys.forEachIndexed { idx, name ->
                             val color = colors[idx % colors.size]
                             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                                 Surface(shape = CircleShape, color = color, modifier = Modifier.size(8.dp)) {}
-                                Text(name, style = MaterialTheme.typography.bodySmall)
+                                Text(name, style = MaterialTheme.typography.bodySmall, maxLines = 1)
                             }
                         }
                     }
