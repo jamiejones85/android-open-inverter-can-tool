@@ -248,6 +248,90 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     fun stopPolling() { pollJob?.cancel() }
 
+    private val _graphHistory = MutableStateFlow<Map<String, List<Pair<Double, Double>>>>(emptyMap())
+    val graphHistory = _graphHistory.asStateFlow()
+
+    fun clearGraphHistory() {
+        _graphHistory.value = emptyMap()
+    }
+
+    fun saveGraphSvg(uri: Uri) {
+        val history = _graphHistory.value
+        if (history.isEmpty()) return toast("No graph data to save")
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val svg = generateSvg(history)
+                ctx.contentResolver.openOutputStream(uri, "wt")?.writer()?.use { it.write(svg) }
+                withContext(Dispatchers.Main) { toast("Graph saved as SVG") }
+            } catch (e: Exception) {
+                withContext(Dispatchers.Main) { toast("Error saving SVG: ${e.message}") }
+            }
+        }
+    }
+
+    private fun generateSvg(history: Map<String, List<Pair<Double, Double>>>): String {
+        val width = 800
+        val height = 500
+        val padding = 60
+        val plotWidth = width - 2 * padding
+        val plotHeight = height - 2 * padding
+
+        var minX = Double.MAX_VALUE
+        var maxX = Double.MIN_VALUE
+        var minY = Double.MAX_VALUE
+        var maxY = Double.MIN_VALUE
+
+        for ((_, points) in history) {
+            for ((x, y) in points) {
+                if (x < minX) minX = x
+                if (x > maxX) maxX = x
+                if (y < minY) minY = y
+                if (y > maxY) maxY = y
+            }
+        }
+        if (minX == maxX) maxX = minX + 1.0
+        if (minY == maxY) { minY -= 1.0; maxY += 1.0 }
+
+        val colors = listOf("#5EEAD4", "#38BDF8", "#F43F5E", "#FBBF24", "#A855F7", "#34D399")
+
+        val sb = StringBuilder()
+        sb.append("<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"$width\" height=\"$height\" viewBox=\"0 0 $width $height\">\n")
+        sb.append("  <rect width=\"100%\" height=\"100%\" fill=\"#111827\"/>\n")
+        sb.append("  <text x=\"${width / 2}\" y=\"30\" fill=\"#F3F4F6\" font-size=\"18\" font-family=\"sans-serif\" text-anchor=\"middle\" font-weight=\"bold\">OI Can Tool - Live Parameter Graph</text>\n")
+        sb.append("  <rect x=\"$padding\" y=\"$padding\" width=\"$plotWidth\" height=\"$plotHeight\" fill=\"#1F2937\" stroke=\"#374151\"/>\n")
+
+        var colorIdx = 0
+        for ((_, points) in history) {
+            if (points.size < 2) continue
+            val color = colors[colorIdx % colors.size]
+            colorIdx++
+
+            val pathPoints = points.map { (x, y) ->
+                val px = padding + ((x - minX) / (maxX - minX)) * plotWidth
+                val py = height - padding - ((y - minY) / (maxY - minY)) * plotHeight
+                "%.1f,%.1f".format(px, py)
+            }
+            sb.append("  <polyline fill=\"none\" stroke=\"$color\" stroke-width=\"2\" points=\"${pathPoints.joinToString(" ")}\"/>\n")
+        }
+
+        var legendX = padding.toFloat()
+        var legendY = (height - padding + 25).toFloat()
+        colorIdx = 0
+        for ((name, _) in history) {
+            val color = colors[colorIdx % colors.size]
+            colorIdx++
+            sb.append("  <circle cx=\"$legendX\" cy=\"$legendY\" r=\"5\" fill=\"$color\"/>\n")
+            sb.append("  <text x=\"${legendX + 10}\" y=\"${legendY + 4}\" fill=\"#E5E7EB\" font-size=\"12\" font-family=\"sans-serif\">$name</text>\n")
+            legendX += 140f
+            if (legendX > width - padding - 100) {
+                legendX = padding.toFloat()
+                legendY += 20f
+            }
+        }
+        sb.append("</svg>")
+        return sb.toString()
+    }
+
     fun startPolling(names: List<String>, stepMs: Long, logUri: Uri?) {
         pollJob?.cancel()
         val db = _ui.value.db ?: return toast("Load a parameter database first")
@@ -261,13 +345,24 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     writer.write((listOf("timestamp") + vars.map { it.name }).joinToString(",") { quote(it) } + "\n")
                 }
                 _ui.update { it.copy(polling = true, logging = writer != null, logRows = 0) }
+                val startTime = System.currentTimeMillis()
                 while (isActive) {
                     val row = ArrayList<String>()
+                    val currentTimestamp = (System.currentTimeMillis() - startTime) / 1000.0
+                    val currentHistory = _graphHistory.value.toMutableMap()
+
                     for (p in vars) {
                         val v = node.read(p)
                         _ui.update { it.copy(values = it.values + (p.name to v)) }
                         row += formatValue(p, v)
+
+                        val series = currentHistory.getOrPut(p.name) { emptyList() }.toMutableList()
+                        series.add(currentTimestamp to v)
+                        if (series.size > 200) series.removeAt(0)
+                        currentHistory[p.name] = series
                     }
+                    _graphHistory.value = currentHistory
+
                     if (writer != null) {
                         val w = writer
                         withContext(Dispatchers.IO) {

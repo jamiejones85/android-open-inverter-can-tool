@@ -23,6 +23,7 @@ import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Refresh
 import android.app.Activity
+import androidx.compose.foundation.Canvas
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.Warning
@@ -543,11 +544,19 @@ private fun LiveScreen(ui: Ui, vm: MainViewModel) = NeedDb(ui, vm) {
     var query by remember { mutableStateOf("") }
     var selected by rememberSaveable { mutableStateOf(setOf<String>()) }
     var stepText by rememberSaveable { mutableStateOf("1.0") }
+    var showGraph by remember { mutableStateOf(false) }
     val step = ((stepText.toDoubleOrNull() ?: 1.0).coerceIn(0.1, 60.0) * 1000).toLong()
     val logPicker = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("text/csv")) { u: Uri? ->
         if (u != null) vm.startPolling(selected.toList(), step, u)
     }
+    val svgPicker = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("image/svg+xml")) { u: Uri? ->
+        if (u != null) vm.saveGraphSvg(u)
+    }
     val items = remember(db, query) { db.params.filter { it.name.contains(query, ignoreCase = true) } }
+
+    if (showGraph) {
+        LiveGraphDialog(vm, onDismiss = { showGraph = false }, onSaveSvg = { svgPicker.launch("can-graph.svg") })
+    }
 
     Column(Modifier.fillMaxSize()) {
         Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -559,6 +568,7 @@ private fun LiveScreen(ui: Ui, vm: MainViewModel) = NeedDb(ui, vm) {
                 } else {
                     Button(onClick = { vm.startPolling(selected.toList(), step, null) }, enabled = ui.connected && selected.isNotEmpty()) { Text("Poll") }
                     OutlinedButton(onClick = { logPicker.launch("oic-log.csv") }, enabled = ui.connected && selected.isNotEmpty()) { Text("Log CSV") }
+                    OutlinedButton(onClick = { showGraph = true }, enabled = selected.isNotEmpty()) { Text("Graph") }
                 }
             }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -584,6 +594,81 @@ private fun LiveScreen(ui: Ui, vm: MainViewModel) = NeedDb(ui, vm) {
             }
         }
     }
+}
+
+@Composable
+private fun LiveGraphDialog(vm: MainViewModel, onDismiss: () -> Unit, onSaveSvg: () -> Unit) {
+    val history by vm.graphHistory.collectAsStateWithLifecycle()
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Live Parameter Graph") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth().height(350.dp)) {
+                if (history.isEmpty() || history.values.all { it.size < 2 }) {
+                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        Text("Start polling to record graph data...", style = MaterialTheme.typography.bodyMedium)
+                    }
+                } else {
+                    val colors = listOf(Color(0xFF5EEAD4), Color(0xFF38BDF8), Color(0xFFF43F5E), Color(0xFFFBBF24), Color(0xFFA855F7), Color(0xFF34D399))
+                    Canvas(modifier = Modifier.fillMaxWidth().weight(1f)) {
+                        val canvasWidth = size.width
+                        val canvasHeight = size.height
+
+                        var minX = Double.MAX_VALUE
+                        var maxX = Double.MIN_VALUE
+                        var minY = Double.MAX_VALUE
+                        var maxY = Double.MIN_VALUE
+
+                        for ((_, points) in history) {
+                            for ((x, y) in points) {
+                                if (x < minX) minX = x
+                                if (x > maxX) maxX = x
+                                if (y < minY) minY = y
+                                if (y > maxY) maxY = y
+                            }
+                        }
+                        if (minX == maxX) maxX = minX + 1.0
+                        if (minY == maxY) { minY -= 1.0; maxY += 1.0 }
+
+                        var colorIdx = 0
+                        for ((_, points) in history) {
+                            if (points.size < 2) continue
+                            val color = colors[colorIdx % colors.size]
+                            colorIdx++
+
+                            val path = androidx.compose.ui.graphics.Path()
+                            points.forEachIndexed { index, (x, y) ->
+                                val px = ((x - minX) / (maxX - minX)).toFloat() * canvasWidth
+                                val py = canvasHeight - ((y - minY) / (maxY - minY)).toFloat() * canvasHeight
+                                if (index == 0) path.moveTo(px, py) else path.lineTo(px, py)
+                            }
+                            drawPath(path = path, color = color, style = androidx.compose.ui.graphics.drawscope.Stroke(width = 3f))
+                        }
+                    }
+
+                    // Legend
+                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth()) {
+                        history.keys.forEachIndexed { idx, name ->
+                            val color = colors[idx % colors.size]
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                Surface(shape = CircleShape, color = color, modifier = Modifier.size(8.dp)) {}
+                                Text(name, style = MaterialTheme.typography.bodySmall)
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                TextButton(onClick = vm::clearGraphHistory) { Text("Clear") }
+                Button(onClick = onSaveSvg) { Text("Save as SVG") }
+                Button(onClick = onDismiss) { Text("Close") }
+            }
+        },
+        dismissButton = {}
+    )
 }
 
 // ---------------------------------------------------------------- CAN map
