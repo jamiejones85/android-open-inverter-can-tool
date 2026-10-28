@@ -538,16 +538,25 @@ private fun EditDialog(p: OiParam, current: Double?, onWrite: (String) -> Unit, 
 }
 
 // ---------------------------------------------------------------- Live + logging
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun LiveScreen(ui: Ui, vm: MainViewModel) = NeedDb(ui, vm) {
     val db = ui.db!!
     var query by remember { mutableStateOf("") }
     var selected by rememberSaveable { mutableStateOf(setOf<String>()) }
+    var activeNodeId by rememberSaveable { mutableIntStateOf(ui.nodeId) }
     var stepText by rememberSaveable { mutableStateOf("1.0") }
     var showGraph by remember { mutableStateOf(false) }
     val step = ((stepText.toDoubleOrNull() ?: 1.0).coerceIn(0.1, 60.0) * 1000).toLong()
+
+    val respondingNodes = if (ui.nodes.isNotEmpty()) ui.nodes else listOf(ui.nodeId)
+    val nodeParams = selected.map {
+        val parts = it.split(":", limit = 2)
+        MainViewModel.NodeParam(parts[0].toInt(), parts[1])
+    }
+
     val logPicker = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("text/csv")) { u: Uri? ->
-        if (u != null) vm.startPolling(selected.toList(), step, u)
+        if (u != null) vm.startPolling(nodeParams, step, u)
     }
     val svgPicker = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("image/svg+xml")) { u: Uri? ->
         if (u != null) vm.saveGraphSvg(u)
@@ -555,38 +564,51 @@ private fun LiveScreen(ui: Ui, vm: MainViewModel) = NeedDb(ui, vm) {
     val items = remember(db, query) { db.params.filter { it.name.contains(query, ignoreCase = true) } }
 
     if (showGraph) {
-        LiveGraphDialog(ui, vm, selected.toList(), onDismiss = { showGraph = false }, onSaveSvg = { svgPicker.launch("can-graph.svg") })
+        LiveGraphDialog(ui, vm, nodeParams, onDismiss = { showGraph = false }, onSaveSvg = { svgPicker.launch("can-graph.svg") })
     }
 
     Column(Modifier.fillMaxSize()) {
         Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("Target Node for Selection:", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                respondingNodes.forEach { n ->
+                    FilterChip(
+                        selected = activeNodeId == n,
+                        onClick = { activeNodeId = n },
+                        label = { Text("Node $n") }
+                    )
+                }
+            }
+
             OutlinedTextField(query, { query = it }, label = { Text("Search") }, singleLine = true, modifier = Modifier.fillMaxWidth())
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                 OutlinedTextField(stepText, { stepText = it }, label = { Text("Interval s") }, singleLine = true, modifier = Modifier.width(110.dp))
                 if (ui.polling) {
                     Button(onClick = vm::stopPolling) { Text(if (ui.logging) "Stop (${ui.logRows} rows)" else "Stop") }
                 } else {
-                    Button(onClick = { vm.startPolling(selected.toList(), step, null) }, enabled = ui.connected && selected.isNotEmpty()) { Text("Poll") }
+                    Button(onClick = { vm.startPolling(nodeParams, step, null) }, enabled = ui.connected && selected.isNotEmpty()) { Text("Poll") }
                     OutlinedButton(onClick = { logPicker.launch("oic-log.csv") }, enabled = ui.connected && selected.isNotEmpty()) { Text("Log CSV") }
                     OutlinedButton(onClick = { showGraph = true }, enabled = selected.isNotEmpty()) { Text("Graph") }
                 }
             }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                TextButton(onClick = { selected = db.params.filter { !it.isParam }.map { it.name }.toSet() }) { Text("All spot values") }
+                TextButton(onClick = { selected = db.params.filter { !it.isParam }.map { "$activeNodeId:${it.name}" }.toSet() }) { Text("All spot values for Node $activeNodeId") }
                 TextButton(onClick = { selected = emptySet() }) { Text("Clear") }
             }
         }
         LazyColumn(Modifier.fillMaxSize()) {
             items(items, key = { it.name }) { p ->
-                val v = ui.values[p.name]
+                val key = "$activeNodeId:${p.name}"
+                val isSelected = key in selected
+                val v = ui.values["$activeNodeId:${p.name}"] ?: ui.values[p.name]
                 Column {
                 ListItem(
                     leadingContent = {
-                        Checkbox(checked = p.name in selected,
-                            onCheckedChange = { selected = if (it) selected + p.name else selected - p.name })
+                        Checkbox(checked = isSelected,
+                            onCheckedChange = { selected = if (it) selected + key else selected - key })
                     },
                     headlineContent = { Text(p.name) },
-                    supportingContent = { Text(if (p.isParam) "parameter" else "spot value") },
+                    supportingContent = { Text("Node $activeNodeId · ${if (p.isParam) "parameter" else "spot value"}") },
                     trailingContent = { Text(if (v == null) "–" else formatValue(p, v), fontFamily = FontFamily.Monospace) }
                 )
                 HorizontalDivider()
@@ -598,12 +620,12 @@ private fun LiveScreen(ui: Ui, vm: MainViewModel) = NeedDb(ui, vm) {
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun LiveGraphDialog(ui: Ui, vm: MainViewModel, selected: List<String>, onDismiss: () -> Unit, onSaveSvg: () -> Unit) {
+private fun LiveGraphDialog(ui: Ui, vm: MainViewModel, nodeParams: List<MainViewModel.NodeParam>, onDismiss: () -> Unit, onSaveSvg: () -> Unit) {
     val history by vm.graphHistory.collectAsStateWithLifecycle()
 
     LaunchedEffect(Unit) {
-        if (!ui.polling && selected.isNotEmpty()) {
-            vm.startPolling(selected, 1000, null)
+        if (!ui.polling && nodeParams.isNotEmpty()) {
+            vm.startPolling(nodeParams, 1000, null)
         }
     }
 
@@ -613,8 +635,8 @@ private fun LiveGraphDialog(ui: Ui, vm: MainViewModel, selected: List<String>, o
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth().fillMaxHeight(0.7f)) {
                 Row(horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    Text(if (ui.polling) "Status: Polling live..." else "Status: Paused", style = MaterialTheme.typography.bodySmall, color = if (ui.polling) Color(0xFF10B981) else MaterialTheme.colorScheme.onSurfaceVariant)
-                    Button(onClick = { if (ui.polling) vm.stopPolling() else vm.startPolling(selected, 1000, null) }, contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)) {
+                    Text(if (ui.polling) "Status: Polling live across nodes..." else "Status: Paused", style = MaterialTheme.typography.bodySmall, color = if (ui.polling) Color(0xFF10B981) else MaterialTheme.colorScheme.onSurfaceVariant)
+                    Button(onClick = { if (ui.polling) vm.stopPolling() else vm.startPolling(nodeParams, 1000, null) }, contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)) {
                         Text(if (ui.polling) "Pause" else "Resume")
                     }
                 }
