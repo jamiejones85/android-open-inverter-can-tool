@@ -600,7 +600,7 @@ private fun LiveScreen(ui: Ui, vm: MainViewModel) = NeedDb(ui, vm) {
             items(items, key = { it.name }) { p ->
                 val key = "$activeNodeId:${p.name}"
                 val isSelected = key in selected
-                val v = ui.values["$activeNodeId:${p.name}"] ?: ui.values[p.name]
+                val v = ui.values["$activeNodeId:${p.name}"]
                 Column {
                 ListItem(
                     leadingContent = {

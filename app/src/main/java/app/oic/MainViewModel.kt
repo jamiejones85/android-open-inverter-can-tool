@@ -207,7 +207,11 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     fun loadDb() = op {
         val id = _ui.value.nodeId
-        val db = loadDbForNode(id) ?: throw IllegalStateException("Failed to load database for node $id")
+        val db = loadDbForNode(id)
+        if (db == null) {
+            toast("Failed to fetch database for node $id")
+            return@op
+        }
         _ui.update { it.copy(db = db, dbSource = "device (node $id), ${db.params.size} items") }
     }
 
