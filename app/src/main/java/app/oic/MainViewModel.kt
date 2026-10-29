@@ -181,16 +181,34 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     // ---------------- identity / database ----------------
     fun readSerial() = op { _ui.update { it.copy(serial = node.serialNo()) } }
 
+    suspend fun loadDbForNode(nodeId: Int): ParamDb? {
+        val dir = File(ctx.filesDir, "dbcache").apply { mkdirs() }
+        sdo.nodeId = nodeId
+        val checksum = try { node.dbChecksum() } catch (e: Exception) { 0L }
+        val existing = dir.listFiles { _, name -> name.startsWith("$nodeId-") }?.maxByOrNull { it.lastModified() }
+        val f = if (checksum != 0L) File(dir, "$nodeId-$checksum.json") else (existing ?: File(dir, "$nodeId-0.json"))
+        
+        val cached = f.exists()
+        val text = if (cached) {
+            f.readText()
+        } else {
+            try {
+                val json = node.dbJson()
+                if (json.isNotBlank()) {
+                    f.writeText(json)
+                    json
+                } else existing?.readText() ?: return null
+            } catch (e: Exception) {
+                existing?.readText() ?: return null
+            }
+        }
+        return try { ParamDbParser.parse(text) } catch (e: Exception) { null }
+    }
+
     fun loadDb() = op {
         val id = _ui.value.nodeId
-        val checksum = node.dbChecksum()
-        val dir = File(ctx.filesDir, "dbcache").apply { mkdirs() }
-        val f = File(dir, "$id-$checksum.json")
-        val cached = f.exists()
-        val text = if (cached) f.readText() else node.dbJson()
-        val db = ParamDbParser.parse(text)
-        if (!cached) f.writeText(text)       // cache only after a successful parse
-        _ui.update { it.copy(db = db, dbSource = "device ${if (cached) "(cached)" else "(downloaded)"}, ${db.params.size} items") }
+        val db = loadDbForNode(id) ?: throw IllegalStateException("Failed to load database for node $id")
+        _ui.update { it.copy(db = db, dbSource = "device (node $id), ${db.params.size} items") }
     }
 
     fun loadDbFile(uri: Uri) = op {
@@ -338,7 +356,6 @@ data class NodeParam(val nodeId: Int, val paramName: String) {
 
     fun startPolling(nodeParams: List<NodeParam>, stepMs: Long, logUri: Uri?) {
         pollJob?.cancel()
-        val db = _ui.value.db ?: return toast("Load a parameter database first")
         if (nodeParams.isEmpty()) return toast("Select at least one item")
         pollJob = viewModelScope.launch {
             var writer: Writer? = null
@@ -355,7 +372,8 @@ data class NodeParam(val nodeId: Int, val paramName: String) {
                     val currentHistory = _graphHistory.value.toMutableMap()
 
                     for (np in nodeParams) {
-                        val p = db.byName[np.paramName] ?: continue
+                        val nodeDb = loadDbForNode(np.nodeId) ?: continue
+                        val p = nodeDb.byName[np.paramName] ?: continue
                         sdo.nodeId = np.nodeId
                         val v = node.read(p)
                         _ui.update { it.copy(values = it.values + ("${np.nodeId}:${p.name}" to v)) }
