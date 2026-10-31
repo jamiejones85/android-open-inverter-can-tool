@@ -12,8 +12,8 @@ android {
         applicationId = "uk.co.mudslidedesign.oicantool"
         minSdk = 24
         targetSdk = 36
-        versionCode = 14
-        versionName = "1.4"
+        versionCode = 15
+        versionName = "1.5"
     }
     signingConfigs {
         create("release") {
