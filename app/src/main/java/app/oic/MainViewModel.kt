@@ -12,6 +12,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import app.oic.can.CanFrame
 import app.oic.can.SlcanAdapter
+import app.oic.can.PicoFlexAdapter
 import app.oic.can.OiProber
 import app.oic.can.CanUpgrader
 import app.oic.can.State
@@ -43,7 +44,9 @@ data class Ui(
     val errors: List<String>? = null,
     val upgrading: Boolean = false,
     val upgradeProgress: Float = 0f,
-    val upgradeStatus: String = ""
+    val upgradeStatus: String = "",
+    val picoLogging: Boolean = false,
+    val picoLogRows: Int = 0
 )
 
 class MainViewModel(app: Application) : AndroidViewModel(app) {
@@ -412,6 +415,54 @@ data class NodeParam(val nodeId: Int, val paramName: String) {
                 _ui.update { it.copy(polling = false, logging = false) }
             }
         }
+    }
+
+    private val picoAdapter = PicoFlexAdapter(usb)
+    private var picoLogJob: Job? = null
+
+    fun startPicoFlexLog(uri: Uri) {
+        picoLogJob?.cancel()
+        val dev = usb.deviceList.values.firstOrNull { OiProber.probe(it) != null }
+            ?: return toast("No PicoFlex / USB CAN device found")
+        
+        picoLogJob = viewModelScope.launch(Dispatchers.IO) {
+            try {
+                picoAdapter.open(dev, 0)
+                ctx.contentResolver.openOutputStream(uri, "w")?.bufferedWriter()?.use { writer ->
+                    writer.write("Time Stamp,ID,Extended,Dir,Bus,LEN,D1,D2,D3,D4,D5,D6,D7,D8\n")
+                    writer.flush()
+                    _ui.update { it.copy(picoLogging = true, picoLogRows = 0) }
+                    var count = 0
+                    val startTime = System.currentTimeMillis()
+                    picoAdapter.frames.collect { f ->
+                        val timestamp = (System.currentTimeMillis() - startTime) / 1000.0
+                        val idHex = "%08X".format(f.id)
+                        val extStr = if (f.extended) "true" else "false"
+                        val dataBytes = Array(8) { i -> if (i < f.data.size) "%02X".format(f.data[i]) else "00" }
+                        val line = "%.3f,%s,%s,Rx,0,%d,%s,\n".format(timestamp, idHex, extStr, f.data.size, dataBytes.joinToString(","))
+                        writer.write(line)
+                        writer.flush()
+                        count++
+                        if (count % 50 == 0) {
+                            _ui.update { it.copy(picoLogRows = count) }
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                toast("PicoFlex log error: ${e.message}")
+            } finally {
+                picoAdapter.close()
+                _ui.update { it.copy(picoLogging = false) }
+            }
+        }
+        toast("PicoFlex FlexRay/CAN logging started")
+    }
+
+    fun stopPicoFlexLog() {
+        picoLogJob?.cancel()
+        picoAdapter.close()
+        _ui.update { it.copy(picoLogging = false) }
+        toast("PicoFlex logging stopped")
     }
 
     private fun quote(s: String) = "\"" + s.replace("\"", "\"\"") + "\""

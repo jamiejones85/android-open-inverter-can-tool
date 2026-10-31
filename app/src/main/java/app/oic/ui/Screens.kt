@@ -921,5 +921,43 @@ private fun ToolsScreen(ui: Ui, vm: MainViewModel) {
                 }
             }
         }
+        item {
+            val picoLogPicker = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("text/csv")) { u: Uri? ->
+                if (u != null) vm.startPicoFlexLog(u)
+            }
+            ElevatedCard(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.elevatedCardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+            ) {
+                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Icon(Icons.Filled.Build, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                        Text("PicoFlex FlexRay / CAN Logger", style = MaterialTheme.typography.titleMedium)
+                    }
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
+                    Text("Connect to Macchina PicoFlex via USB and log CAN, CAN-FD, and FlexRay frames to SavvyCAN CSV format.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+
+                    if (ui.picoLogging) {
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Text("Status: Logging FlexRay/CAN live... (${ui.picoLogRows} frames)", style = MaterialTheme.typography.bodyMedium, color = Color(0xFF10B981), fontFamily = FontFamily.Monospace)
+                            Button(
+                                onClick = vm::stopPicoFlexLog,
+                                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Text("Stop PicoFlex Logging")
+                            }
+                        }
+                    } else {
+                        Button(
+                            onClick = { picoLogPicker.launch("picoflex-flexray-log.csv") },
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text("Start PicoFlex FlexRay Log")
+                        }
+                    }
+                }
+            }
+        }
     }
 }
