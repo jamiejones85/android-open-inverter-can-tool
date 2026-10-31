@@ -18,6 +18,7 @@ object OiProber {
     private val custom: UsbSerialProber by lazy {
         val table = UsbSerialProber.getDefaultProbeTable()
         table.addProduct(0xad50, 0x60c4, CdcAcmSerialDriver::class.java) // CANable slcan
+        table.addProduct(14337, 56780, CdcAcmSerialDriver::class.java) // PicoFlex
         UsbSerialProber(table)
     }
 
