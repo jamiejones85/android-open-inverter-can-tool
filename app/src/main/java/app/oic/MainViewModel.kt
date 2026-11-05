@@ -210,9 +210,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             }
         }
 
-        // 3. Try downloading from device via SDO
+        // 3. Try downloading from device via SDO (with SdoClient retry support)
         try {
-            sdo.timeoutMs = 5000
+            sdo.timeoutMs = 10000
             val json = node.dbJson()
             if (json.isNotBlank()) {
                 val f = File(dir, "$nodeId-$checksum.json")
@@ -225,16 +225,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             sdo.timeoutMs = 1000
         }
 
-        // 4. Fallback: Use ANY cached database file from other nodes (e.g. Node 1)
-        val anyFiles = dir.listFiles { _, name -> name.endsWith(".json") }?.sortedByDescending { it.lastModified() }
-        if (!anyFiles.isNullOrEmpty()) {
-            for (f in anyFiles) {
-                runCatching { return ParamDbParser.parse(f.readText()) }
-            }
-        }
-
-        // 5. Fallback: Use currently loaded db if available
-        return _ui.value.db
+        return null
     }
 
     fun loadDb() = op {

@@ -48,6 +48,19 @@ class SdoClient(private val bus: CanBus) {
         }
 
     suspend fun upload(index: Int, sub: Int): ByteArray = mutex.withLock {
+        var lastEx: Exception? = null
+        for (attempt in 1..3) {
+            try {
+                return uploadOnce(index, sub)
+            } catch (e: Exception) {
+                lastEx = e
+                kotlinx.coroutines.delay(300L * attempt)
+            }
+        }
+        throw lastEx ?: SdoTimeout()
+    }
+
+    private suspend fun uploadOnce(index: Int, sub: Int): ByteArray {
         val r = transact(frame(0x40, index, sub))
         val b0 = r[0].toInt() and 0xFF
         when (b0 shr 5) {
@@ -55,7 +68,7 @@ class SdoClient(private val bus: CanBus) {
             2 -> if (b0 and 0x02 != 0) {
                 // expedited
                 val unused = if (b0 and 1 != 0) (b0 shr 2) and 3 else 0
-                r.copyOfRange(4, 8 - unused)
+                return r.copyOfRange(4, 8 - unused)
             } else {
                 // segmented
                 val out = ByteArrayOutputStream()
@@ -63,13 +76,13 @@ class SdoClient(private val bus: CanBus) {
                 while (true) {
                     val s = transact(ByteArray(8).also { it[0] = (0x60 or (toggle shl 4)).toByte() })
                     val c = s[0].toInt() and 0xFF
-                    if (c shr 5 == 4) throw SdoAbort(le32(s, 4))
+                    if (c shr 5 == 4) throw SdoAbort(le32(r, 4))
                     check(c shr 5 == 0 && ((c shr 4) and 1) == toggle) { "Bad SDO segment" }
                     out.write(s, 1, 7 - ((c shr 1) and 7))
                     if (c and 1 != 0) break
                     toggle = toggle xor 1
                 }
-                out.toByteArray()
+                return out.toByteArray()
             }
             else -> error("Unexpected SDO response 0x%02X".format(b0))
         }
