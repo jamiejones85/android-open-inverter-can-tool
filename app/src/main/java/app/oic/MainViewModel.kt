@@ -187,15 +187,24 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     suspend fun loadDbForNode(nodeId: Int): ParamDb? {
         val dir = File(ctx.filesDir, "dbcache").apply { mkdirs() }
         sdo.nodeId = nodeId
-        val checksum = try { node.dbChecksum() } catch (e: Exception) { 0L }
+        val checksum = try {
+            sdo.timeoutMs = 3000
+            node.dbChecksum()
+        } catch (e: Exception) {
+            0L
+        } finally {
+            sdo.timeoutMs = 1000
+        }
+
         val existing = dir.listFiles { _, name -> name.startsWith("$nodeId-") }?.maxByOrNull { it.lastModified() }
         val f = if (checksum != 0L) File(dir, "$nodeId-$checksum.json") else (existing ?: File(dir, "$nodeId-0.json"))
-        
+
         val cached = f.exists()
         val text = if (cached) {
             f.readText()
         } else {
             try {
+                sdo.timeoutMs = 5000
                 val json = node.dbJson()
                 if (json.isNotBlank()) {
                     f.writeText(json)
@@ -203,9 +212,15 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 } else existing?.readText() ?: return null
             } catch (e: Exception) {
                 existing?.readText() ?: return null
+            } finally {
+                sdo.timeoutMs = 1000
             }
         }
-        return try { ParamDbParser.parse(text) } catch (e: Exception) { null }
+        return try {
+            ParamDbParser.parse(text)
+        } catch (e: Exception) {
+            existing?.readText()?.let { runCatching { ParamDbParser.parse(it) }.getOrNull() }
+        }
     }
 
     fun loadDb() = op {
