@@ -137,7 +137,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private fun openDevice(dev: UsbDevice) {
         viewModelScope.launch {
             try {
-                withContext(Dispatchers.IO) { adapter.open(dev, _ui.value.bitrate) }
+                withContext(Dispatchers.IO) { 
+                    adapter.open(dev, _ui.value.bitrate)
+                    delay(300)
+                }
                 val label = BITRATES[_ui.value.bitrate]
                 _ui.update { it.copy(connected = true, status = "Connected, $label bit/s, normal mode") }
                 scan()
