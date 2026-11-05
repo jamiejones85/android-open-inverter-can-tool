@@ -380,19 +380,17 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         return sb.toString()
     }
 
-data class NodeParam(val nodeId: Int, val paramName: String) {
-    val displayName: String get() = "N$nodeId: $paramName"
-}
-
-    fun startPolling(nodeParams: List<NodeParam>, stepMs: Long, logUri: Uri?) {
+    fun startPolling(names: List<String>, stepMs: Long, logUri: Uri?) {
         pollJob?.cancel()
-        if (nodeParams.isEmpty()) return toast("Select at least one item")
+        val db = _ui.value.db ?: return toast("Load a parameter database first")
+        val vars = names.mapNotNull { db.byName[it] }
+        if (vars.isEmpty()) return toast("Select at least one item")
         pollJob = viewModelScope.launch {
             var writer: Writer? = null
             try {
                 if (logUri != null) {
                     writer = withContext(Dispatchers.IO) { ctx.contentResolver.openOutputStream(logUri, "wt")!!.bufferedWriter() }
-                    writer.write((listOf("timestamp") + nodeParams.map { it.displayName }).joinToString(",") { quote(it) } + "\n")
+                    writer.write((listOf("timestamp") + vars.map { it.name }).joinToString(",") { quote(it) } + "\n")
                 }
                 _ui.update { it.copy(polling = true, logging = writer != null, logRows = 0) }
                 val startTime = System.currentTimeMillis()
@@ -401,19 +399,15 @@ data class NodeParam(val nodeId: Int, val paramName: String) {
                     val currentTimestamp = (System.currentTimeMillis() - startTime) / 1000.0
                     val currentHistory = _graphHistory.value.toMutableMap()
 
-                    for (np in nodeParams) {
-                        val nodeDb = loadDbForNode(np.nodeId) ?: continue
-                        val p = nodeDb.byName[np.paramName] ?: continue
-                        sdo.nodeId = np.nodeId
+                    for (p in vars) {
                         val v = node.read(p)
-                        _ui.update { it.copy(values = it.values + ("${np.nodeId}:${p.name}" to v)) }
+                        _ui.update { it.copy(values = it.values + (p.name to v)) }
                         row += formatValue(p, v)
 
-                        val key = np.displayName
-                        val series = currentHistory.getOrPut(key) { emptyList() }.toMutableList()
+                        val series = currentHistory.getOrPut(p.name) { emptyList() }.toMutableList()
                         series.add(currentTimestamp to v)
                         if (series.size > 200) series.removeAt(0)
-                        currentHistory[key] = series
+                        currentHistory[p.name] = series
                     }
                     _graphHistory.value = currentHistory
 
@@ -430,7 +424,7 @@ data class NodeParam(val nodeId: Int, val paramName: String) {
             } catch (e: CancellationException) {
                 throw e
             } catch (e: SdoTimeout) {
-                toast("Polling timeout")
+                toast("Polling stopped: no response from node ${_ui.value.nodeId}")
             } catch (e: Exception) {
                 toast(e.message ?: e.toString())
             } finally {
