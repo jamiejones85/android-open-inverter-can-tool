@@ -22,9 +22,14 @@ class SdoClient(private val bus: CanBus) {
 
     private suspend fun transact(req: ByteArray): ByteArray = coroutineScope {
         val node = nodeId
-        // Subscribe before sending so a fast reply cannot be missed
+        // Subscribe before sending so a fast reply cannot be missed, validating SDO response command bytes
         val resp = async(start = CoroutineStart.UNDISPATCHED) {
-            bus.frames.first { !it.extended && it.id == 0x580 + node && it.data.size == 8 }
+            bus.frames.first { f ->
+                !f.extended && 
+                f.id == 0x580 + node && 
+                f.data.size == 8 && 
+                (f.data[0].toInt() and 0xE0 == 0x40 || f.data[0].toInt() and 0xE0 == 0x60 || f.data[0].toInt() and 0xE0 == 0x80)
+            }
         }
         bus.send(CanFrame(0x600 + node, false, false, req))
         val frame = withTimeoutOrNull(timeoutMs) { resp.await() }
