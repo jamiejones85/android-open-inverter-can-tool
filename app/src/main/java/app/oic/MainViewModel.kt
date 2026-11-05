@@ -188,7 +188,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         val dir = File(ctx.filesDir, "dbcache").apply { mkdirs() }
         sdo.nodeId = nodeId
         val checksum = try {
-            sdo.timeoutMs = 3000
+            sdo.timeoutMs = 2000
             node.dbChecksum()
         } catch (e: Exception) {
             0L
@@ -196,31 +196,45 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             sdo.timeoutMs = 1000
         }
 
-        val existing = dir.listFiles { _, name -> name.startsWith("$nodeId-") }?.maxByOrNull { it.lastModified() }
-        val f = if (checksum != 0L) File(dir, "$nodeId-$checksum.json") else (existing ?: File(dir, "$nodeId-0.json"))
+        // 1. Try exact node & checksum cache
+        val exactFile = if (checksum != 0L) File(dir, "$nodeId-$checksum.json") else null
+        if (exactFile != null && exactFile.exists()) {
+            runCatching { return ParamDbParser.parse(exactFile.readText()) }
+        }
 
-        val cached = f.exists()
-        val text = if (cached) {
-            f.readText()
-        } else {
-            try {
-                sdo.timeoutMs = 5000
-                val json = node.dbJson()
-                if (json.isNotBlank()) {
-                    f.writeText(json)
-                    json
-                } else existing?.readText() ?: return null
-            } catch (e: Exception) {
-                existing?.readText() ?: return null
-            } finally {
-                sdo.timeoutMs = 1000
+        // 2. Try any cached file for this specific node
+        val nodeFiles = dir.listFiles { _, name -> name.startsWith("$nodeId-") }?.sortedByDescending { it.lastModified() }
+        if (!nodeFiles.isNullOrEmpty()) {
+            for (f in nodeFiles) {
+                runCatching { return ParamDbParser.parse(f.readText()) }
             }
         }
-        return try {
-            ParamDbParser.parse(text)
+
+        // 3. Try downloading from device via SDO
+        try {
+            sdo.timeoutMs = 5000
+            val json = node.dbJson()
+            if (json.isNotBlank()) {
+                val f = File(dir, "$nodeId-$checksum.json")
+                f.writeText(json)
+                runCatching { return ParamDbParser.parse(json) }
+            }
         } catch (e: Exception) {
-            existing?.readText()?.let { runCatching { ParamDbParser.parse(it) }.getOrNull() }
+            // SDO download failed for this node
+        } finally {
+            sdo.timeoutMs = 1000
         }
+
+        // 4. Fallback: Use ANY cached database file from other nodes (e.g. Node 1)
+        val anyFiles = dir.listFiles { _, name -> name.endsWith(".json") }?.sortedByDescending { it.lastModified() }
+        if (!anyFiles.isNullOrEmpty()) {
+            for (f in anyFiles) {
+                runCatching { return ParamDbParser.parse(f.readText()) }
+            }
+        }
+
+        // 5. Fallback: Use currently loaded db if available
+        return _ui.value.db
     }
 
     fun loadDb() = op {
