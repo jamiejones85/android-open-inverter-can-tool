@@ -140,7 +140,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 withContext(Dispatchers.IO) { adapter.open(dev, _ui.value.bitrate) }
                 val label = BITRATES[_ui.value.bitrate]
                 _ui.update { it.copy(connected = true, status = "Connected, $label bit/s, normal mode") }
-                loadDb()
+                scan()
             } catch (e: Exception) {
                 toast(e.message ?: "Could not open adapter")
             }
