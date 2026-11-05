@@ -233,12 +233,28 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     fun loadDb() = op {
         val id = _ui.value.nodeId
+        val dir = File(ctx.filesDir, "dbcache").apply { mkdirs() }
+        val checksum = try {
+            sdo.timeoutMs = 2000
+            node.dbChecksum()
+        } catch (e: Exception) {
+            0L
+        } finally {
+            sdo.timeoutMs = 1000
+        }
+
+        // Force fresh download by clearing existing cache for this node
+        val f = if (checksum != 0L) File(dir, "$id-$checksum.json") else File(dir, "$id-0.json")
+        runCatching { f.delete() }
+        val nodeFiles = dir.listFiles { _, name -> name.startsWith("$id-") }
+        nodeFiles?.forEach { runCatching { it.delete() } }
+
         val db = loadDbForNode(id)
         if (db == null) {
             toast("Failed to fetch database for node $id")
             return@op
         }
-        _ui.update { it.copy(db = db, dbSource = "device (node $id), ${db.params.size} items") }
+        _ui.update { it.copy(db = db, dbSource = "device (node $id, fresh), ${db.params.size} items") }
     }
 
     fun loadDbFile(uri: Uri) = op {
