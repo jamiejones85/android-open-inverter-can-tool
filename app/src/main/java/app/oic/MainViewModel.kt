@@ -548,8 +548,11 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     ctx.contentResolver.openInputStream(uri)?.use { it.readBytes() }
                 } ?: return@launch toast("Could not read firmware file")
 
-                _ui.update { it.copy(upgrading = true, upgradeProgress = 0f, upgradeStatus = "Waiting for device boot...") }
-                toast("Starting firmware upgrade. Reboot/power-cycle the device into bootloader mode.")
+                _ui.update { it.copy(upgrading = true, upgradeProgress = 0f, upgradeStatus = "Rebooting node into bootloader...") }
+                toast("Issuing reboot command to node ${_ui.value.nodeId}...")
+                
+                runCatching { node.reset() }
+                delay(500)
 
                 val upgrader = CanUpgrader(adapter, null, bytes) { update ->
                     val statusText = when (update.state) {
