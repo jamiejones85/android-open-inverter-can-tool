@@ -235,13 +235,6 @@ class StartState : InternalState {
                 sm.transitionTo(HeaderState())
                 sm.reply(data.copyOfRange(4, 8))
             }
-        } else if (data.size == 1 && (data[0] == DevicePacket.START.value ||
-                    data[0] == DevicePacket.PAGE.value ||
-                    data[0] == DevicePacket.CRC.value ||
-                    data[0] == DevicePacket.DONE.value)) {
-            sm.transitionTo(FailureState(Failure.UPGRADE_IN_PROGRESS))
-        } else {
-            sm.transitionTo(FailureState(Failure.PROTOCOL_ERROR))
         }
     }
 

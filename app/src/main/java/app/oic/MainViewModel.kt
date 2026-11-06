@@ -608,7 +608,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     }
 
                     Log.d("OI_UPGRADE", "Running CanUpgrader attempt $attempt")
-                    success = upgrader.run(this, 30000)
+                    val runFinished = upgrader.run(this, 30000)
+                    success = runFinished && upgrader.state == State.COMPLETE
                     Log.d("OI_UPGRADE", "CanUpgrader attempt $attempt result: $success, state: ${upgrader.state}")
                     if (success) {
                         toast("Firmware upgrade finished: ${upgrader.state}")
