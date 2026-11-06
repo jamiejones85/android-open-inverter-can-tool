@@ -113,9 +113,6 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     fun setNode(id: Int) {
         sdo.nodeId = id.coerceIn(1, 127)
         _ui.update { it.copy(nodeId = sdo.nodeId, serial = null) }
-        if (_ui.value.connected) {
-            loadDb()
-        }
     }
 
     fun connect() {
@@ -572,31 +569,22 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         stopPolling()
         viewModelScope.launch {
             try {
-                _ui.update { it.copy(busy = true, upgrading = true, upgradeProgress = 0f, upgradeStatus = "Rebooting node into bootloader...") }
-                Log.d("OI_UPGRADE", "Sending reset command to node ${_ui.value.nodeId}...")
-                toast("Rebooting node ${_ui.value.nodeId} into bootloader...")
-
-                sdo.nodeId = _ui.value.nodeId
-                runCatching { node.reset() }
-                delay(1500)
-
                 val bytes = withContext(Dispatchers.IO) {
                     ctx.contentResolver.openInputStream(uri)?.use { it.readBytes() }
                 } ?: return@launch toast("Could not read firmware file")
 
+                _ui.update { it.copy(busy = true, upgrading = true, upgradeProgress = 0f, upgradeStatus = "Preparing firmware upgrade...") }
+                sdo.nodeId = _ui.value.nodeId
+
                 var success = false
                 var attempt = 1
                 while (attempt <= 5 && !success) {
-                    if (attempt > 1) {
-                        _ui.update { it.copy(upgradeStatus = "Retry attempt $attempt of 5 (rebooting)...") }
-                        Log.d("OI_UPGRADE", "Retry attempt $attempt sending reset to node ${_ui.value.nodeId}")
-                        runCatching { node.reset() }
-                        delay(2000)
-                    }
+                    _ui.update { it.copy(upgradeStatus = "Attempt $attempt/5: Listening for bootloader & sending reboot...") }
+                    Log.d("OI_UPGRADE", "Starting attempt $attempt for node ${sdo.nodeId}")
 
                     val upgrader = CanUpgrader(adapter, null, bytes) { update ->
                         val statusText = when (update.state) {
-                            State.START -> "Attempt $attempt/5: Waiting for device boot..."
+                            State.START -> "Attempt $attempt/5: Waiting for bootloader HELLO..."
                             State.HEADER -> "Header negotiation (Serial: ${update.serialno?.joinToString("") { "%02X".format(it) } ?: "?"})"
                             State.UPLOAD -> "Uploading firmware (${update.progress.toInt()}%)..."
                             State.CHECK_CRC -> "Validating page CRC..."
@@ -607,15 +595,25 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                         _ui.update { it.copy(upgradeProgress = update.progress, upgradeStatus = statusText) }
                     }
 
-                    Log.d("OI_UPGRADE", "Running CanUpgrader attempt $attempt")
-                    val runFinished = upgrader.run(this, 30000)
+                    // 1. Start CanUpgrader frame listener FIRST on background coroutine
+                    val upgraderDeferred = async { upgrader.run(this, 60000) }
+                    delay(50) // Give listener time to subscribe to CAN frames
+
+                    // 2. NOW fire the reset command while upgrader is actively listening!
+                    Log.d("OI_UPGRADE", "Sending reset command to node ${sdo.nodeId} while upgrader is listening...")
+                    runCatching { node.reset() }
+
+                    // 3. Await upgrader result
+                    val runFinished = upgraderDeferred.await()
                     success = runFinished && upgrader.state == State.COMPLETE
                     Log.d("OI_UPGRADE", "CanUpgrader attempt $attempt result: $success, state: ${upgrader.state}")
+
                     if (success) {
                         toast("Firmware upgrade finished: ${upgrader.state}")
                         break
                     }
                     attempt++
+                    delay(500)
                 }
                 if (!success) {
                     toast("Firmware upgrade failed after 5 attempts.")
