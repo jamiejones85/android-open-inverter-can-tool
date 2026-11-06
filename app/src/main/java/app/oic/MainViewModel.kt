@@ -579,7 +579,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 
                 sdo.nodeId = _ui.value.nodeId
                 runCatching { node.reset() }
-                delay(500)
+                delay(1000)
 
                 var success = false
                 var attempt = 1
