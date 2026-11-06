@@ -568,6 +568,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     fun upgradeFirmware(uri: Uri) {
         if (!ui.value.connected) return toast("Connect the adapter first")
+        stopPolling()
         viewModelScope.launch {
             try {
                 val bytes = withContext(Dispatchers.IO) {
