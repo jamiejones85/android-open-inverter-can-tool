@@ -419,12 +419,21 @@ private fun DeviceScreen(ui: Ui, vm: MainViewModel) {
                             Text(ui.upgradeStatus, style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace)
                         }
                     } else {
-                        Button(
-                            onClick = { fwPicker.launch(arrayOf("application/octet-stream", "*/*")) },
-                            enabled = ui.connected,
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Text("Select Firmware (.bin) & Upgrade")
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                            Button(
+                                onClick = { fwPicker.launch(arrayOf("application/octet-stream", "*/*")) },
+                                enabled = ui.connected,
+                                modifier = Modifier.weight(1.2f)
+                            ) {
+                                Text("Select .bin & Upgrade")
+                            }
+                            OutlinedButton(
+                                onClick = { vm.command("reset") },
+                                enabled = ui.connected,
+                                modifier = Modifier.weight(0.8f)
+                            ) {
+                                Text("Reboot Node")
+                            }
                         }
                     }
                 }
