@@ -85,7 +85,7 @@ class OiNode(private val sdo: SdoClient) {
     }
 
     // ---- commands ----
-    private suspend fun command(sub: Int, arg: Int = 0) = sdo.download(Oi.COMMAND_INDEX, sub, le32(arg))
+    private suspend fun command(sub: Int, arg: Int = 0) = sdo.download(Oi.COMMAND_INDEX, sub, le32(arg), lenient = true)
     suspend fun save() = command(Oi.CMD_SAVE)
     suspend fun load() = command(Oi.CMD_LOAD)
     suspend fun reset() = command(Oi.CMD_RESET)
