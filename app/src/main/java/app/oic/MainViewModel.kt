@@ -564,8 +564,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     ctx.contentResolver.openInputStream(uri)?.use { it.readBytes() }
                 } ?: return@launch toast("Could not read firmware file")
 
-                _ui.update { it.copy(upgrading = true, upgradeProgress = 0f, upgradeStatus = "Rebooting node into bootloader...") }
-                toast("Issuing reboot command to node ${_ui.value.nodeId}...")
+                _ui.update { it.copy(upgrading = true, upgradeProgress = 0f, upgradeStatus = "Waiting for bootloader (power-cycle inverter if needed)...") }
+                toast("Reboot command sent. Please power-cycle the inverter if it does not reboot automatically.")
                 
                 sdo.nodeId = _ui.value.nodeId
                 runCatching { node.reset() }
