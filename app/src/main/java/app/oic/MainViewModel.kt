@@ -228,6 +228,16 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             sdo.timeoutMs = 1000
         }
 
+        // 4. Fallback: Load default params.json from app assets
+        try {
+            val assetJson = ctx.assets.open("params.json").bufferedReader().use { it.readText() }
+            if (assetJson.isNotBlank()) {
+                runCatching { return ParamDbParser.parse(assetJson) }
+            }
+        } catch (e: Exception) {
+            // Asset fallback failed
+        }
+
         return null
     }
 
