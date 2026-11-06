@@ -5,6 +5,7 @@ import app.oic.can.CanFrame
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -101,9 +102,14 @@ class SdoClient(private val bus: CanBus) {
         mutex.withLock {
             require(data.size in 1..4)
             val r = try {
-                transact(frame(0x23 or ((4 - data.size) shl 2), index, sub, data))
+                val res = transact(frame(0x23 or ((4 - data.size) shl 2), index, sub, data))
+                delay(100)
+                res
             } catch (e: SdoTimeout) {
-                if (index == 0x5002 && sub == 2) return@withLock
+                if (index == 0x5002 && sub == 2) {
+                    delay(100)
+                    return@withLock
+                }
                 throw e
             }
             val b0 = r[0].toInt() and 0xFF
