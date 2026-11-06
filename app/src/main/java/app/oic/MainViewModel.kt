@@ -567,6 +567,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 _ui.update { it.copy(upgrading = true, upgradeProgress = 0f, upgradeStatus = "Rebooting node into bootloader...") }
                 toast("Issuing reboot command to node ${_ui.value.nodeId}...")
                 
+                sdo.nodeId = _ui.value.nodeId
                 runCatching { node.reset() }
                 delay(500)
 
