@@ -567,17 +567,6 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         _ui.update { it.copy(mapTx = tx, mapRx = rx) }
     }
 
-    private suspend fun sendResetCommand(targetNodeId: Int) {
-        val resetFrame = ByteArray(8).also {
-            it[0] = 0x23.toByte()
-            it[1] = 0x02.toByte()
-            it[2] = 0x50.toByte()
-            it[3] = 0x02.toByte()
-        }
-        adapter.send(CanFrame(0x600 + targetNodeId, false, false, resetFrame))
-        delay(200)
-    }
-
     fun upgradeFirmware(uri: Uri) {
         if (!ui.value.connected) return toast("Connect the adapter first")
         stopPolling()
@@ -591,27 +580,28 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 Log.d("OI_UPGRADE", "Starting firmware upgrade for node ${_ui.value.nodeId}")
                 toast("Reboot command sent to node ${_ui.value.nodeId}. Starting upgrade attempts...")
                 
+                sdo.nodeId = _ui.value.nodeId
                 try {
-                    Log.d("OI_UPGRADE", "Sending reset command directly to node ${_ui.value.nodeId}")
-                    sendResetCommand(_ui.value.nodeId)
-                    Log.d("OI_UPGRADE", "Reset command sent directly")
+                    Log.d("OI_UPGRADE", "Calling node.reset() for node ${sdo.nodeId}")
+                    node.reset()
+                    Log.d("OI_UPGRADE", "node.reset() returned successfully")
                 } catch (e: Exception) {
-                    Log.d("OI_UPGRADE", "Reset command exception: ${e.message}")
+                    Log.d("OI_UPGRADE", "node.reset() exception: ${e.message}")
                 }
-                delay(800)
+                delay(1000)
 
                 var success = false
                 var attempt = 1
                 while (attempt <= 5 && !success) {
                     if (attempt > 1) {
                         _ui.update { it.copy(upgradeStatus = "Retry attempt $attempt of 5 (rebooting)...") }
-                        Log.d("OI_UPGRADE", "Retry attempt $attempt sending reset to node ${_ui.value.nodeId}")
+                        Log.d("OI_UPGRADE", "Retry attempt $attempt calling node.reset() for node ${sdo.nodeId}")
                         try {
-                            sendResetCommand(_ui.value.nodeId)
+                            node.reset()
                         } catch (e: Exception) {
-                            Log.d("OI_UPGRADE", "Retry reset exception: ${e.message}")
+                            Log.d("OI_UPGRADE", "Retry node.reset() exception: ${e.message}")
                         }
-                        delay(1500)
+                        delay(2000)
                     }
 
                     val upgrader = CanUpgrader(adapter, null, bytes) { update ->
