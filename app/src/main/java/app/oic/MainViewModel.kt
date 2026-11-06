@@ -572,6 +572,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         stopPolling()
         viewModelScope.launch {
             try {
+                // Settle USB serial connection after returning from system file picker
+                delay(500)
+
                 val bytes = withContext(Dispatchers.IO) {
                     ctx.contentResolver.openInputStream(uri)?.use { it.readBytes() }
                 } ?: return@launch toast("Could not read firmware file")
@@ -583,6 +586,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 sdo.nodeId = _ui.value.nodeId
                 try {
                     Log.d("OI_UPGRADE", "Calling node.reset() for node ${sdo.nodeId}")
+                    node.reset()
+                    delay(300)
                     node.reset()
                     Log.d("OI_UPGRADE", "node.reset() returned successfully")
                 } catch (e: Exception) {
