@@ -570,11 +570,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     fun upgradeFirmware(uri: Uri) {
         if (!ui.value.connected) return toast("Connect the adapter first")
         stopPolling()
+        command("reset")
         viewModelScope.launch {
             try {
-                // Settle USB serial connection after returning from system file picker
-                delay(500)
-
                 val bytes = withContext(Dispatchers.IO) {
                     ctx.contentResolver.openInputStream(uri)?.use { it.readBytes() }
                 } ?: return@launch toast("Could not read firmware file")
@@ -583,16 +581,6 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 Log.d("OI_UPGRADE", "Starting firmware upgrade for node ${_ui.value.nodeId}")
                 toast("Reboot command sent to node ${_ui.value.nodeId}. Starting upgrade attempts...")
                 
-                sdo.nodeId = _ui.value.nodeId
-                try {
-                    Log.d("OI_UPGRADE", "Calling node.reset() for node ${sdo.nodeId}")
-                    node.reset()
-                    delay(300)
-                    node.reset()
-                    Log.d("OI_UPGRADE", "node.reset() returned successfully")
-                } catch (e: Exception) {
-                    Log.d("OI_UPGRADE", "node.reset() exception: ${e.message}")
-                }
                 delay(1000)
 
                 var success = false
@@ -600,12 +588,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 while (attempt <= 5 && !success) {
                     if (attempt > 1) {
                         _ui.update { it.copy(upgradeStatus = "Retry attempt $attempt of 5 (rebooting)...") }
-                        Log.d("OI_UPGRADE", "Retry attempt $attempt calling node.reset() for node ${sdo.nodeId}")
-                        try {
-                            node.reset()
-                        } catch (e: Exception) {
-                            Log.d("OI_UPGRADE", "Retry node.reset() exception: ${e.message}")
-                        }
+                        Log.d("OI_UPGRADE", "Retry attempt $attempt calling command('reset') for node ${_ui.value.nodeId}")
+                        command("reset")
                         delay(2000)
                     }
 
