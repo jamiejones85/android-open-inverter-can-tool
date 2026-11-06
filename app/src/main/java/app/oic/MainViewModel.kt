@@ -570,26 +570,27 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     fun upgradeFirmware(uri: Uri) {
         if (!ui.value.connected) return toast("Connect the adapter first")
         stopPolling()
-        command("reset")
         viewModelScope.launch {
             try {
+                _ui.update { it.copy(busy = true, upgrading = true, upgradeProgress = 0f, upgradeStatus = "Rebooting node into bootloader...") }
+                Log.d("OI_UPGRADE", "Sending reset command to node ${_ui.value.nodeId}...")
+                toast("Rebooting node ${_ui.value.nodeId} into bootloader...")
+
+                sdo.nodeId = _ui.value.nodeId
+                runCatching { node.reset() }
+                delay(1500)
+
                 val bytes = withContext(Dispatchers.IO) {
                     ctx.contentResolver.openInputStream(uri)?.use { it.readBytes() }
                 } ?: return@launch toast("Could not read firmware file")
-
-                _ui.update { it.copy(upgrading = true, upgradeProgress = 0f, upgradeStatus = "Rebooting node into bootloader...") }
-                Log.d("OI_UPGRADE", "Starting firmware upgrade for node ${_ui.value.nodeId}")
-                toast("Reboot command sent to node ${_ui.value.nodeId}. Starting upgrade attempts...")
-                
-                delay(1000)
 
                 var success = false
                 var attempt = 1
                 while (attempt <= 5 && !success) {
                     if (attempt > 1) {
                         _ui.update { it.copy(upgradeStatus = "Retry attempt $attempt of 5 (rebooting)...") }
-                        Log.d("OI_UPGRADE", "Retry attempt $attempt calling command('reset') for node ${_ui.value.nodeId}")
-                        command("reset")
+                        Log.d("OI_UPGRADE", "Retry attempt $attempt sending reset to node ${_ui.value.nodeId}")
+                        runCatching { node.reset() }
                         delay(2000)
                     }
 
@@ -622,7 +623,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 Log.e("OI_UPGRADE", "Upgrade error", e)
                 toast("Upgrade error: ${e.message}")
             } finally {
-                _ui.update { it.copy(upgrading = false) }
+                _ui.update { it.copy(busy = false, upgrading = false) }
             }
         }
     }
