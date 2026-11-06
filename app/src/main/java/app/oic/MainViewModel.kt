@@ -574,31 +574,44 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     ctx.contentResolver.openInputStream(uri)?.use { it.readBytes() }
                 } ?: return@launch toast("Could not read firmware file")
 
-                _ui.update { it.copy(upgrading = true, upgradeProgress = 0f, upgradeStatus = "Waiting for bootloader (power-cycle inverter if needed)...") }
-                toast("Reboot command sent. Please power-cycle the inverter if it does not reboot automatically.")
+                _ui.update { it.copy(upgrading = true, upgradeProgress = 0f, upgradeStatus = "Rebooting node into bootloader...") }
+                toast("Reboot command sent. Starting upgrade attempts...")
                 
                 sdo.nodeId = _ui.value.nodeId
                 runCatching { node.reset() }
                 delay(500)
 
-                val upgrader = CanUpgrader(adapter, null, bytes) { update ->
-                    val statusText = when (update.state) {
-                        State.START -> "Waiting for device boot..."
-                        State.HEADER -> "Header negotiation (Serial: ${update.serialno?.joinToString("") { "%02X".format(it) } ?: "?"})"
-                        State.UPLOAD -> "Uploading firmware (${update.progress.toInt()}%)..."
-                        State.CHECK_CRC -> "Validating page CRC..."
-                        State.WAIT_FOR_DONE -> "Finalizing upgrade..."
-                        State.COMPLETE -> "Upgrade completed successfully!"
-                        State.FAILURE -> "Upgrade failed: ${update.failure}"
+                var success = false
+                var attempt = 1
+                while (attempt <= 5 && !success) {
+                    if (attempt > 1) {
+                        _ui.update { it.copy(upgradeStatus = "Retry attempt $attempt of 5 (rebooting)...") }
+                        runCatching { node.reset() }
+                        delay(2000)
                     }
-                    _ui.update { it.copy(upgradeProgress = update.progress, upgradeStatus = statusText) }
-                }
 
-                val success = upgrader.run(this, 60000)
-                if (success) {
-                    toast("Firmware upgrade finished: ${upgrader.state}")
-                } else {
-                    toast("Firmware upgrade timed out")
+                    val upgrader = CanUpgrader(adapter, null, bytes) { update ->
+                        val statusText = when (update.state) {
+                            State.START -> "Attempt $attempt/5: Waiting for device boot..."
+                            State.HEADER -> "Header negotiation (Serial: ${update.serialno?.joinToString("") { "%02X".format(it) } ?: "?"})"
+                            State.UPLOAD -> "Uploading firmware (${update.progress.toInt()}%)..."
+                            State.CHECK_CRC -> "Validating page CRC..."
+                            State.WAIT_FOR_DONE -> "Finalizing upgrade..."
+                            State.COMPLETE -> "Upgrade completed successfully!"
+                            State.FAILURE -> "Upgrade failed: ${update.failure}"
+                        }
+                        _ui.update { it.copy(upgradeProgress = update.progress, upgradeStatus = statusText) }
+                    }
+
+                    success = upgrader.run(this, 40000)
+                    if (success) {
+                        toast("Firmware upgrade finished: ${upgrader.state}")
+                        break
+                    }
+                    attempt++
+                }
+                if (!success) {
+                    toast("Firmware upgrade failed after 5 attempts. Please power-cycle inverter manually.")
                 }
             } catch (e: Exception) {
                 toast("Upgrade error: ${e.message}")
