@@ -178,7 +178,7 @@ class StateMachine(
     val pages: List<Page>,
     private val statusChannel: Channel<StateUpdate>
 ) {
-    private var currentState: InternalState = StartState()
+    private var currentState: InternalState = StartState().also { it.sm = this }
     var serialno: ByteArray? = null
     var currentPageIndex = 0
     var confirmedPageIndex = -1
@@ -245,7 +245,7 @@ class StartState : InternalState {
         }
     }
 
-    override fun details(): StateUpdate = StateUpdate(State.START, sm.serialno, null, 0f)
+    override fun details(): StateUpdate = StateUpdate(State.START, if (::sm.isInitialized) sm.serialno else null, null, 0f)
 }
 
 class HeaderState : InternalState {
