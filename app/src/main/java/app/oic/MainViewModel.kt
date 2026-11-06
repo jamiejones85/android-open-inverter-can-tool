@@ -8,6 +8,7 @@ import android.content.Intent
 import android.hardware.usb.UsbDevice
 import android.hardware.usb.UsbManager
 import android.net.Uri
+import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import app.oic.can.CanFrame
@@ -576,10 +577,17 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 } ?: return@launch toast("Could not read firmware file")
 
                 _ui.update { it.copy(upgrading = true, upgradeProgress = 0f, upgradeStatus = "Rebooting node into bootloader...") }
-                toast("Reboot command sent. Starting upgrade attempts...")
+                Log.d("OI_UPGRADE", "Starting firmware upgrade for node ${_ui.value.nodeId}")
+                toast("Reboot command sent to node ${_ui.value.nodeId}. Starting upgrade attempts...")
                 
                 sdo.nodeId = _ui.value.nodeId
-                runCatching { node.reset() }
+                try {
+                    Log.d("OI_UPGRADE", "Sending reset command to node ${sdo.nodeId}")
+                    node.reset()
+                    Log.d("OI_UPGRADE", "Reset command sent successfully")
+                } catch (e: Exception) {
+                    Log.d("OI_UPGRADE", "Reset command exception: ${e.message}")
+                }
                 delay(1000)
 
                 var success = false
@@ -587,7 +595,12 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 while (attempt <= 5 && !success) {
                     if (attempt > 1) {
                         _ui.update { it.copy(upgradeStatus = "Retry attempt $attempt of 5 (rebooting)...") }
-                        runCatching { node.reset() }
+                        Log.d("OI_UPGRADE", "Retry attempt $attempt sending reset to node ${sdo.nodeId}")
+                        try {
+                            node.reset()
+                        } catch (e: Exception) {
+                            Log.d("OI_UPGRADE", "Retry reset exception: ${e.message}")
+                        }
                         delay(2000)
                     }
 
@@ -604,7 +617,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                         _ui.update { it.copy(upgradeProgress = update.progress, upgradeStatus = statusText) }
                     }
 
-                    success = upgrader.run(this, 40000)
+                    Log.d("OI_UPGRADE", "Running CanUpgrader attempt $attempt")
+                    success = upgrader.run(this, 30000)
+                    Log.d("OI_UPGRADE", "CanUpgrader attempt $attempt result: $success, state: ${upgrader.state}")
                     if (success) {
                         toast("Firmware upgrade finished: ${upgrader.state}")
                         break
@@ -612,9 +627,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     attempt++
                 }
                 if (!success) {
-                    toast("Firmware upgrade failed after 5 attempts. Please power-cycle inverter manually.")
+                    toast("Firmware upgrade failed after 5 attempts.")
                 }
             } catch (e: Exception) {
+                Log.e("OI_UPGRADE", "Upgrade error", e)
                 toast("Upgrade error: ${e.message}")
             } finally {
                 _ui.update { it.copy(upgrading = false) }
