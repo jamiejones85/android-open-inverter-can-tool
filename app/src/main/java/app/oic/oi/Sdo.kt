@@ -100,7 +100,12 @@ class SdoClient(private val bus: CanBus) {
     suspend fun download(index: Int, sub: Int, data: ByteArray, lenient: Boolean = false) =
         mutex.withLock {
             require(data.size in 1..4)
-            val r = transact(frame(0x23 or ((4 - data.size) shl 2), index, sub, data))
+            val r = try {
+                transact(frame(0x23 or ((4 - data.size) shl 2), index, sub, data))
+            } catch (e: SdoTimeout) {
+                if (index == 0x5002 && sub == 2) return@withLock
+                throw e
+            }
             val b0 = r[0].toInt() and 0xFF
             if (b0 shr 5 == 4) throw SdoAbort(le32(r, 4))
             if (!lenient) check(b0 == 0x60) { "Unexpected SDO response 0x%02X".format(b0) }
