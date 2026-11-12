@@ -273,12 +273,14 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     // ---------------- read / write ----------------
     fun readOne(name: String) = op {
+        sdo.nodeId = _ui.value.nodeId
         val p = _ui.value.db?.byName?.get(name) ?: return@op
         val v = node.read(p)
         _ui.update { it.copy(values = it.values + (name to v)) }
     }
 
     fun readAll(paramsOnly: Boolean) = op {
+        sdo.nodeId = _ui.value.nodeId
         val list = _ui.value.db?.params?.filter { !paramsOnly || it.isParam } ?: return@op
         val acc = HashMap<String, Double>()
         for ((i, p) in list.withIndex()) {
@@ -289,6 +291,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun write(name: String, text: String) = op {
+        sdo.nodeId = _ui.value.nodeId
         val p = _ui.value.db?.byName?.get(name) ?: return@op
         val err = node.writeValue(p, text)
         if (err != null) return@op toast(err)
@@ -419,6 +422,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 _ui.update { it.copy(polling = true, logging = writer != null, logRows = 0) }
                 val startTime = System.currentTimeMillis()
                 while (isActive) {
+                    sdo.nodeId = _ui.value.nodeId
                     val row = ArrayList<String>()
                     val currentTimestamp = (System.currentTimeMillis() - startTime) / 1000.0
                     val currentHistory = _graphHistory.value.toMutableMap()
