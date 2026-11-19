@@ -26,6 +26,7 @@ class MainActivity : ComponentActivity() {
                     i.getBooleanExtra(UsbManager.EXTRA_PERMISSION_GRANTED, false)
                 )
                 UsbManager.ACTION_USB_DEVICE_DETACHED -> vm.disconnect()
+                UsbManager.ACTION_USB_DEVICE_ATTACHED -> vm.tryAutoConnect()
             }
         }
     }
@@ -37,9 +38,24 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        val filter = IntentFilter(MainViewModel.ACTION_PERM).apply { addAction(UsbManager.ACTION_USB_DEVICE_DETACHED) }
+        val filter = IntentFilter(MainViewModel.ACTION_PERM).apply {
+            addAction(UsbManager.ACTION_USB_DEVICE_DETACHED)
+            addAction(UsbManager.ACTION_USB_DEVICE_ATTACHED)
+        }
         ContextCompat.registerReceiver(this, receiver, filter, ContextCompat.RECEIVER_NOT_EXPORTED)
         setContent { OicTheme { OicApp(vm) } }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        vm.tryAutoConnect()
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        if (intent.action == UsbManager.ACTION_USB_DEVICE_ATTACHED) {
+            vm.tryAutoConnect()
+        }
     }
 
     override fun onDestroy() {

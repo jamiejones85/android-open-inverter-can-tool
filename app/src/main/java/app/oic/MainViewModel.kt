@@ -85,6 +85,20 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             stopPolling()
             _ui.update { it.copy(connected = false, status = "Disconnected: $msg") }
         }
+        tryAutoConnect()
+    }
+
+    fun tryAutoConnect() {
+        if (_ui.value.connected) return
+        val dev = usb.deviceList.values.firstOrNull { OiProber.probe(it) != null } ?: return
+        if (usb.hasPermission(dev)) {
+            openDevice(dev)
+        } else {
+            val pi = PendingIntent.getBroadcast(
+                ctx, 0, Intent(ACTION_PERM).setPackage(ctx.packageName), PendingIntent.FLAG_MUTABLE
+            )
+            usb.requestPermission(dev, pi)
+        }
     }
 
     private fun toast(msg: String) { _events.tryEmit(msg) }
