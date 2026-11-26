@@ -1,6 +1,7 @@
 package app.oic.ui
 
 import android.net.Uri
+import app.oic.GhReleaseAsset
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
@@ -24,9 +25,14 @@ import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Refresh
 import android.app.Activity
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.Warning
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -52,11 +58,10 @@ fun OicTheme(content: @Composable () -> Unit) {
 private class TabDef(val label: String, val icon: ImageVector)
 
 private val TABS = listOf(
+    TabDef("Dashboard", Icons.Filled.Info),
     TabDef("Device", Icons.Filled.Home),
     TabDef("Params", Icons.Filled.Settings),
-    TabDef("Live", Icons.Filled.Info),
-    TabDef("CAN map", Icons.Filled.List),
-    TabDef("Files", Icons.Filled.Menu),
+    TabDef("Live", Icons.Filled.PlayArrow),
     TabDef("Tools", Icons.Filled.Build)
 )
 
@@ -87,11 +92,10 @@ fun OicApp(vm: MainViewModel) {
         Column(Modifier.padding(pad).fillMaxSize()) {
             if (ui.busy) LinearProgressIndicator(Modifier.fillMaxWidth())
             when (tab) {
-                0 -> DeviceScreen(ui, vm)
-                1 -> ParamsScreen(ui, vm)
-                2 -> LiveScreen(ui, vm)
-                3 -> MapScreen(ui, vm)
-                4 -> FilesScreen(ui, vm)
+                0 -> DashboardScreen(ui, vm)
+                1 -> DeviceScreen(ui, vm)
+                2 -> ParamsScreen(ui, vm)
+                3 -> LiveScreen(ui, vm)
                 else -> ToolsScreen(ui, vm)
             }
         }
@@ -130,6 +134,7 @@ private fun DeviceScreen(ui: Ui, vm: MainViewModel) {
     var nodeText by remember(ui.nodeId) { mutableStateOf(ui.nodeId.toString()) }
     val hasDonated by vm.hasDonated.collectAsStateWithLifecycle()
     val context = LocalContext.current
+    val dbFile = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { u: Uri? -> u?.let { vm.loadDbFile(it) } }
 
     confirm?.let { (msg, act) -> Confirm(msg, act) { confirm = null } }
 
@@ -261,10 +266,13 @@ private fun DeviceScreen(ui: Ui, vm: MainViewModel) {
 
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         OutlinedButton(onClick = vm::readSerial, enabled = ui.connected, modifier = Modifier.weight(1f)) {
-                            Text("Serial Number")
+                            Text("Serial")
                         }
-                        OutlinedButton(onClick = vm::loadDb, enabled = ui.connected, modifier = Modifier.weight(1f)) {
-                            Text("Load Database")
+                        OutlinedButton(onClick = { vm.loadDb(forceReload = true) }, enabled = ui.connected, modifier = Modifier.weight(1f)) {
+                            Text("Reload DB")
+                        }
+                        OutlinedButton(onClick = { dbFile.launch(arrayOf("application/json", "text/*", "*/*")) }, enabled = ui.connected, modifier = Modifier.weight(1f)) {
+                            Text("From File")
                         }
                     }
                     ui.serial?.let { Text("Serial: $it", fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodySmall) }
@@ -398,8 +406,16 @@ private fun DeviceScreen(ui: Ui, vm: MainViewModel) {
         }
 
         item {
+            var showReleasesDialog by remember { mutableStateOf(false) }
             val fwPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { u: Uri? ->
                 u?.let { vm.upgradeFirmware(it) }
+            }
+            if (showReleasesDialog) {
+                GithubReleasesDialog(
+                    vm = vm,
+                    onDismiss = { showReleasesDialog = false },
+                    onSelectAsset = { asset -> vm.downloadAndUpgradeRelease(asset) }
+                )
             }
             ElevatedCard(
                 modifier = Modifier.fillMaxWidth(),
@@ -419,20 +435,27 @@ private fun DeviceScreen(ui: Ui, vm: MainViewModel) {
                             Text(ui.upgradeStatus, style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace)
                         }
                     } else {
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.fillMaxWidth()) {
                             Button(
                                 onClick = { fwPicker.launch(arrayOf("application/octet-stream", "*/*")) },
                                 enabled = ui.connected,
-                                modifier = Modifier.weight(1.2f)
+                                modifier = Modifier.weight(1f)
                             ) {
-                                Text("Select .bin & Upgrade")
+                                Text("Local .bin")
+                            }
+                            Button(
+                                onClick = { showReleasesDialog = true },
+                                enabled = ui.connected,
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Text("Online Releases")
                             }
                             OutlinedButton(
                                 onClick = { vm.command("reset") },
                                 enabled = ui.connected,
-                                modifier = Modifier.weight(0.8f)
+                                modifier = Modifier.weight(1f)
                             ) {
-                                Text("Reboot Node")
+                                Text("Reboot")
                             }
                         }
                     }
@@ -446,36 +469,48 @@ private fun DeviceScreen(ui: Ui, vm: MainViewModel) {
 @Composable
 private fun ParamsScreen(ui: Ui, vm: MainViewModel) = NeedDb(ui, vm) {
     val db = ui.db!!
+    var subTab by rememberSaveable { mutableIntStateOf(0) }
     var query by remember { mutableStateOf("") }
-    var showValues by remember { mutableStateOf(false) }
     var editing by remember { mutableStateOf<OiParam?>(null) }
 
-    val items = remember(db, query, showValues) {
-        db.params.filter { (showValues || it.isParam) && it.name.contains(query, ignoreCase = true) }
+    val items = remember(db, query, subTab) {
+        db.params.filter { (if (subTab == 1) !it.isParam else it.isParam) && it.name.contains(query, ignoreCase = true) }
     }
 
     editing?.let { p -> EditDialog(p, ui.values[p.name], onWrite = { vm.write(p.name, it) }, onRead = { vm.readOne(p.name) }) { editing = null } }
 
     Column(Modifier.fillMaxSize()) {
         Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            OutlinedTextField(query, { query = it }, label = { Text("Search") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                FilterChip(selected = !showValues, onClick = { showValues = false }, label = { Text("Parameters") })
-                FilterChip(selected = showValues, onClick = { showValues = true }, label = { Text("+ spot values") })
-                OutlinedButton(onClick = { vm.readAll(!showValues) }, enabled = ui.connected) { Text("Read all") }
+            TabRow(selectedTabIndex = subTab) {
+                Tab(selected = subTab == 0, onClick = { subTab = 0 }, text = { Text("Parameters") })
+                Tab(selected = subTab == 1, onClick = { subTab = 1 }, text = { Text("Spot Values") })
+                Tab(selected = subTab == 2, onClick = { subTab = 2 }, text = { Text("CAN Map") })
+            }
+
+            if (subTab != 2) {
+                OutlinedTextField(query, { query = it }, label = { Text("Search") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                Row(horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                    Text(if (subTab == 0) "${items.size} Parameters" else "${items.size} Spot Values", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
+                    OutlinedButton(onClick = { vm.readAll(subTab == 0) }, enabled = ui.connected) { Text("Read All") }
+                }
             }
         }
-        LazyColumn(Modifier.fillMaxSize()) {
-            items(items, key = { it.name }) { p ->
-                val v = ui.values[p.name]
-                Column {
-                ListItem(
-                    headlineContent = { Text(p.name) },
-                    supportingContent = { Text(listOfNotNull(p.category, if (p.enums.isEmpty() && p.bits.isEmpty()) p.unit else null).filter { it.isNotBlank() }.joinToString(" · ")) },
-                    trailingContent = { Text(if (v == null) "–" else formatValue(p, v), fontFamily = FontFamily.Monospace) },
-                    modifier = Modifier.clickable(enabled = p.isParam) { editing = p }
-                )
-                HorizontalDivider()
+
+        if (subTab == 2) {
+            MapScreenContent(ui, vm)
+        } else {
+            LazyColumn(Modifier.fillMaxSize()) {
+                items(items, key = { it.name }) { p ->
+                    val v = ui.values[p.name]
+                    Column {
+                        ListItem(
+                            headlineContent = { Text(p.name) },
+                            supportingContent = { Text(listOfNotNull(p.category, if (p.enums.isEmpty() && p.bits.isEmpty()) p.unit else null).filter { it.isNotBlank() }.joinToString(" · ")) },
+                            trailingContent = { Text(if (v == null) "–" else formatValue(p, v), fontFamily = FontFamily.Monospace) },
+                            modifier = Modifier.clickable(enabled = p.isParam) { editing = p }
+                        )
+                        HorizontalDivider()
+                    }
                 }
             }
         }
@@ -692,7 +727,7 @@ private fun LiveGraphDialog(vm: MainViewModel, onDismiss: () -> Unit, onSaveSvg:
 
 // ---------------------------------------------------------------- CAN map
 @Composable
-private fun MapScreen(ui: Ui, vm: MainViewModel) = NeedDb(ui, vm) {
+private fun MapScreenContent(ui: Ui, vm: MainViewModel) = NeedDb(ui, vm) {
     val db = ui.db!!
     var adding by remember { mutableStateOf(false) }
     var confirm by remember { mutableStateOf<Pair<String, () -> Unit>?>(null) }
@@ -783,27 +818,6 @@ private fun AddMapDialog(db: ParamDb, onAdd: (Direction, Int, Boolean, MapEntry)
     )
 }
 
-// ---------------------------------------------------------------- Files
-@Composable
-private fun FilesScreen(ui: Ui, vm: MainViewModel) {
-    val save = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { u: Uri? -> u?.let { vm.saveParams(it) } }
-    val load = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { u: Uri? -> u?.let { vm.loadParams(it) } }
-    val dbFile = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { u: Uri? -> u?.let { vm.loadDbFile(it) } }
-    var confirmLoad by remember { mutableStateOf(false) }
-    if (confirmLoad) Confirm("Write every parameter in the chosen file to node ${ui.nodeId}?", { load.launch(arrayOf("application/json", "*/*")) }) { confirmLoad = false }
-
-    Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Text("Parameter backup", style = MaterialTheme.typography.titleMedium)
-        Text("Saves every parameter as JSON, in the same format as the oic command line tool.", style = MaterialTheme.typography.bodySmall)
-        Button(onClick = { save.launch("parameters.json") }, enabled = ui.connected && ui.db != null) { Text("Save parameters to file") }
-        OutlinedButton(onClick = { confirmLoad = true }, enabled = ui.connected && ui.db != null) { Text("Load parameters from file") }
-        HorizontalDivider()
-        Text("Parameter database", style = MaterialTheme.typography.titleMedium)
-        Text("Current: ${ui.dbSource}")
-        OutlinedButton(onClick = { dbFile.launch(arrayOf("application/json", "*/*")) }) { Text("Use database file instead") }
-    }
-}
-
 // ---------------------------------------------------------------- Tools
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -813,6 +827,44 @@ private fun ToolsScreen(ui: Ui, vm: MainViewModel) {
     }
 
     LazyColumn(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+        item {
+            val save = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { u: Uri? -> u?.let { vm.saveParams(it) } }
+            val load = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { u: Uri? -> u?.let { vm.loadParams(it) } }
+            val dbFile = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { u: Uri? -> u?.let { vm.loadDbFile(it) } }
+            var confirmLoad by remember { mutableStateOf(false) }
+            if (confirmLoad) Confirm("Write every parameter in the chosen file to node ${ui.nodeId}?", { load.launch(arrayOf("application/json", "*/*")) }) { confirmLoad = false }
+
+            ElevatedCard(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.elevatedCardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+            ) {
+                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Icon(Icons.Filled.Menu, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                        Text("Parameter Backup & Files", style = MaterialTheme.typography.titleMedium)
+                    }
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
+                    Text("Backup or restore all parameters as JSON files, or load a custom database file.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                        Button(
+                            onClick = { save.launch("parameters.json") },
+                            enabled = ui.connected && ui.db != null,
+                            modifier = Modifier.weight(1f)
+                        ) { Text("Save JSON") }
+                        OutlinedButton(
+                            onClick = { confirmLoad = true },
+                            enabled = ui.connected && ui.db != null,
+                            modifier = Modifier.weight(1f)
+                        ) { Text("Load JSON") }
+                    }
+                    OutlinedButton(
+                        onClick = { dbFile.launch(arrayOf("application/json", "*/*")) },
+                        modifier = Modifier.fillMaxWidth()
+                    ) { Text("Use Custom DB File") }
+                }
+            }
+        }
         item {
             ElevatedCard(
                 modifier = Modifier.fillMaxWidth(),
@@ -934,4 +986,258 @@ private fun ToolsScreen(ui: Ui, vm: MainViewModel) {
             }
         }
     }
+}
+
+// ---------------------------------------------------------------- Dashboard
+fun formatOpmode(v: Double?): String = when (v?.toInt()) {
+    0 -> "OFF"
+    1 -> "RUN"
+    2 -> "PRECHARGE"
+    3 -> "PCH FAIL"
+    4 -> "CHARGE"
+    5 -> "PREHEAT"
+    else -> "OFFLINE"
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun DashboardScreen(ui: Ui, vm: MainViewModel) {
+    LaunchedEffect(Unit) {
+        vm.startDashboardPolling(3)
+    }
+
+    val soc = ui.values["SOC"] ?: ui.values["SOCFC"]
+    val opmode = ui.values["opmode"]
+    val udc = ui.values["udc"]
+    val idc = ui.values["idc"]
+    val power = ui.values["power"]
+    val vMin = ui.values["BMS_Vmin"]
+    val vMax = ui.values["BMS_Vmax"]
+    val tMin = ui.values["BMS_Tmin"]
+    val tMax = ui.values["BMS_Tmax"]
+    val uaux = ui.values["uaux"]
+
+    BoxWithConstraints(modifier = Modifier.fillMaxSize().background(Color(0xFF0B1329))) {
+        val isLandscape = this.maxWidth > this.maxHeight
+
+        Column(modifier = Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+            // Header Bar
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Icon(Icons.Filled.Info, contentDescription = null, tint = Color(0xFF22D3EE))
+                    Text("EV COCKPIT DASHBOARD", style = MaterialTheme.typography.titleMedium, color = Color(0xFFF3F4F6), fontWeight = FontWeight.Bold)
+                }
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Surface(shape = CircleShape, color = if (ui.connected) Color(0xFF10B981) else Color(0xFFEF4444), modifier = Modifier.size(8.dp)) {}
+                    Text("Node 3 · SDO Live", style = MaterialTheme.typography.labelMedium, color = Color(0xFF9CA3AF), fontFamily = FontFamily.Monospace)
+                }
+            }
+
+            if (isLandscape) {
+                Row(modifier = Modifier.fillMaxWidth().weight(1f), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                    // Left Column: Circular Arc Gauge & SOC
+                    Box(modifier = Modifier.weight(1f).fillMaxHeight(), contentAlignment = Alignment.Center) {
+                        Box(modifier = Modifier.size(200.dp), contentAlignment = Alignment.Center) {
+                            BatteryArcGauge(soc = soc?.toFloat() ?: 0f, modifier = Modifier.fillMaxSize())
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                Text("⚡ ${soc?.toInt() ?: 0}%", style = MaterialTheme.typography.headlineLarge, color = Color(0xFF22D3EE), fontWeight = FontWeight.Bold)
+                                Text("BATTERY SOC", style = MaterialTheme.typography.labelSmall, color = Color(0xFF9CA3AF))
+                            }
+                        }
+                    }
+
+                    // Right Column: Metrics
+                    Column(modifier = Modifier.weight(1.2f).fillMaxHeight(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        DashboardMetricsGrid(opmode = opmode, udc = udc, idc = idc, power = power, vMin = vMin, vMax = vMax, tMin = tMin, tMax = tMax, uaux = uaux)
+                    }
+                }
+            } else {
+                // Portrait Layout
+                Column(modifier = Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                    Box(modifier = Modifier.fillMaxWidth().height(220.dp), contentAlignment = Alignment.Center) {
+                        Box(modifier = Modifier.size(200.dp), contentAlignment = Alignment.Center) {
+                            BatteryArcGauge(soc = soc?.toFloat() ?: 0f, modifier = Modifier.fillMaxSize())
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                Text("⚡ ${soc?.toInt() ?: 0}%", style = MaterialTheme.typography.displayMedium, color = Color(0xFF22D3EE), fontWeight = FontWeight.Bold)
+                                Text("BATTERY SOC", style = MaterialTheme.typography.labelSmall, color = Color(0xFF9CA3AF))
+                            }
+                        }
+                    }
+
+                    DashboardMetricsGrid(opmode = opmode, udc = udc, idc = idc, power = power, vMin = vMin, vMax = vMax, tMin = tMin, tMax = tMax, uaux = uaux)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun BatteryArcGauge(soc: Float, modifier: Modifier = Modifier) {
+    Box(modifier = modifier, contentAlignment = Alignment.Center) {
+        Canvas(modifier = Modifier.fillMaxSize()) {
+            val w = size.width
+            val h = size.height
+            val center = androidx.compose.ui.geometry.Offset(w / 2f, h / 2f)
+            val radius = minOf(w, h) / 2f - 16f
+
+            val startAngle = 135f
+            val sweepAngle = 270f
+            val cyanGlow = Color(0xFF06B6D4)
+            val cyanBright = Color(0xFF22D3EE)
+            val trackColor = Color(0xFF1E293B)
+
+            // Background Arc Track
+            drawArc(
+                color = trackColor,
+                startAngle = startAngle,
+                sweepAngle = sweepAngle,
+                useCenter = false,
+                topLeft = androidx.compose.ui.geometry.Offset(center.x - radius, center.y - radius),
+                size = androidx.compose.ui.geometry.Size(radius * 2, radius * 2),
+                style = Stroke(width = 16f, cap = androidx.compose.ui.graphics.StrokeCap.Round)
+            )
+
+            // Active Battery Fill Arc
+            val currentSweep = sweepAngle * (soc.coerceIn(0f, 100f) / 100f)
+            if (currentSweep > 0f) {
+                drawArc(
+                    color = cyanGlow.copy(alpha = 0.3f),
+                    startAngle = startAngle,
+                    sweepAngle = currentSweep,
+                    useCenter = false,
+                    topLeft = androidx.compose.ui.geometry.Offset(center.x - radius, center.y - radius),
+                    size = androidx.compose.ui.geometry.Size(radius * 2, radius * 2),
+                    style = Stroke(width = 24f, cap = androidx.compose.ui.graphics.StrokeCap.Round)
+                )
+                drawArc(
+                    color = if (soc > 20f) cyanBright else Color(0xFFEF4444),
+                    startAngle = startAngle,
+                    sweepAngle = currentSweep,
+                    useCenter = false,
+                    topLeft = androidx.compose.ui.geometry.Offset(center.x - radius, center.y - radius),
+                    size = androidx.compose.ui.geometry.Size(radius * 2, radius * 2),
+                    style = Stroke(width = 12f, cap = androidx.compose.ui.graphics.StrokeCap.Round)
+                )
+            }
+        }
+    }
+}
+
+
+
+@Composable
+private fun DashboardMetricsGrid(
+    opmode: Double?,
+    udc: Double?,
+    idc: Double?,
+    power: Double?,
+    vMin: Double?,
+    vMax: Double?,
+    tMin: Double?,
+    tMax: Double?,
+    uaux: Double? = null
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth()) {
+        Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth()) {
+            MetricCard("OPMODE", formatOpmode(opmode), Color(0xFF10B981), Modifier.weight(1f))
+            MetricCard("PACK VOLTAGE", if (udc != null) "${udc.fmt()} V" else "–", Color(0xFF22D3EE), Modifier.weight(1f))
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth()) {
+            MetricCard("CURRENT & POWER", if (idc != null && power != null) "${idc.fmt()} A | ${power.fmt()} kW" else if (idc != null) "${idc.fmt()} A" else "–", Color(0xFFA855F7), Modifier.weight(1f))
+            MetricCard("12V AUX VOLTAGE", if (uaux != null) "${uaux.fmt()} V" else "–", Color(0xFF34D399), Modifier.weight(1f))
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth()) {
+            MetricCard("CELL V (MIN / MAX)", if (vMin != null && vMax != null) "${vMin.fmt()}V / ${vMax.fmt()}V" else "–", Color(0xFF38BDF8), Modifier.weight(1f))
+            MetricCard("CELL TEMP (MIN / MAX)", if (tMin != null && tMax != null) "${tMin.toInt()}°C / ${tMax.toInt()}°C" else "–", Color(0xFFFBBF24), Modifier.weight(1f))
+        }
+    }
+}
+
+@Composable
+private fun MetricCard(label: String, value: String, accentColor: Color, modifier: Modifier = Modifier) {
+    ElevatedCard(
+        modifier = modifier,
+        colors = CardDefaults.elevatedCardColors(containerColor = Color(0xFF1E293B))
+    ) {
+        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text(label, style = MaterialTheme.typography.labelSmall, color = Color(0xFF9CA3AF))
+            Text(value, style = MaterialTheme.typography.titleMedium, color = accentColor, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
+        }
+    }
+}
+
+@Composable
+private fun GithubReleasesDialog(
+    vm: MainViewModel,
+    onDismiss: () -> Unit,
+    onSelectAsset: (GhReleaseAsset) -> Unit
+) {
+    val releases by vm.ghReleases.collectAsStateWithLifecycle()
+
+    LaunchedEffect(Unit) {
+        if (releases.isEmpty()) {
+            vm.fetchGithubReleases()
+        }
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Icon(Icons.Filled.Refresh, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                Text("Stm32-VCU Online Releases")
+            }
+        },
+        text = {
+            Column(modifier = Modifier.fillMaxWidth().heightIn(max = 350.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (releases.isEmpty()) {
+                    Box(modifier = Modifier.fillMaxWidth().height(150.dp), contentAlignment = Alignment.Center) {
+                        CircularProgressIndicator()
+                    }
+                } else {
+                    LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        items(releases, key = { it.tagName }) { rel ->
+                            ElevatedCard(
+                                modifier = Modifier.fillMaxWidth(),
+                                colors = CardDefaults.elevatedCardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+                            ) {
+                                Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    Text(rel.name, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+                                    Text(rel.tagName, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary, fontFamily = FontFamily.Monospace)
+                                    if (rel.body.isNotBlank()) {
+                                        Text(rel.body.take(120) + "...", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    }
+                                    HorizontalDivider()
+                                    rel.assets.forEach { asset ->
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth().clickable { onSelectAsset(asset); onDismiss() }.padding(vertical = 4.dp),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                                Icon(Icons.Filled.Build, contentDescription = null, modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.primary)
+                                                Text(asset.name, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
+                                            }
+                                            Text("${asset.size / 1024} KB", style = MaterialTheme.typography.labelSmall, fontFamily = FontFamily.Monospace)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                TextButton(onClick = vm::fetchGithubReleases) { Text("Refresh") }
+                TextButton(onClick = onDismiss) { Text("Close") }
+            }
+        },
+        dismissButton = {}
+    )
 }

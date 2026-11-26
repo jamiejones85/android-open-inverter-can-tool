@@ -50,6 +50,9 @@ data class Ui(
     val picoLogRows: Int = 0
 )
 
+data class GhReleaseAsset(val name: String, val downloadUrl: String, val size: Long)
+data class GhRelease(val tagName: String, val name: String, val body: String, val assets: List<GhReleaseAsset>)
+
 class MainViewModel(app: Application) : AndroidViewModel(app) {
     companion object {
         const val ACTION_PERM = "app.oic.USB_PERMISSION"
@@ -199,7 +202,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     // ---------------- identity / database ----------------
     fun readSerial() = op { _ui.update { it.copy(serial = node.serialNo()) } }
 
-    suspend fun loadDbForNode(nodeId: Int): ParamDb? {
+    suspend fun loadDbForNode(nodeId: Int, forceReload: Boolean = false): ParamDb? {
         val dir = File(ctx.filesDir, "dbcache").apply { mkdirs() }
         sdo.nodeId = nodeId
         val checksum = try {
@@ -211,17 +214,23 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             sdo.timeoutMs = 1000
         }
 
-        // 1. Try exact node & checksum cache
+        val existingFiles = dir.listFiles { _, name -> name.startsWith("$nodeId-") }?.sortedByDescending { it.lastModified() }
         val exactFile = if (checksum != 0L) File(dir, "$nodeId-$checksum.json") else null
-        if (exactFile != null && exactFile.exists()) {
-            runCatching { return ParamDbParser.parse(exactFile.readText()) }
-        }
 
-        // 2. Try any cached file for this specific node
-        val nodeFiles = dir.listFiles { _, name -> name.startsWith("$nodeId-") }?.sortedByDescending { it.lastModified() }
-        if (!nodeFiles.isNullOrEmpty()) {
-            for (f in nodeFiles) {
-                runCatching { return ParamDbParser.parse(f.readText()) }
+        if (forceReload) {
+            exactFile?.delete()
+            existingFiles?.forEach { runCatching { it.delete() } }
+        } else {
+            // 1. Try exact node & checksum cache
+            if (exactFile != null && exactFile.exists()) {
+                runCatching { return ParamDbParser.parse(exactFile.readText()) }
+            }
+
+            // 2. Try any cached file for this specific node
+            if (!existingFiles.isNullOrEmpty()) {
+                for (f in existingFiles) {
+                    runCatching { return ParamDbParser.parse(f.readText()) }
+                }
             }
         }
 
@@ -230,9 +239,14 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             sdo.timeoutMs = 10000
             val json = node.dbJson()
             if (json.isNotBlank()) {
-                val f = File(dir, "$nodeId-$checksum.json")
-                f.writeText(json)
-                runCatching { return ParamDbParser.parse(json) }
+                val db = ParamDbParser.parse(json)
+                val versionStr = db.byName["version"]?.let { p ->
+                    runCatching { formatValue(p, node.read(p)) }.getOrNull()
+                }?.replace(Regex("[^a-zA-Z0-9._-]"), "_") ?: checksum.toString()
+
+                val cacheFile = File(dir, "$nodeId-$versionStr.json")
+                cacheFile.writeText(json)
+                return db
             }
         } catch (e: Exception) {
             // SDO download failed for this node
@@ -253,30 +267,15 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         return null
     }
 
-    fun loadDb() = op {
+    fun loadDb(forceReload: Boolean = false) = op {
         val id = _ui.value.nodeId
-        val dir = File(ctx.filesDir, "dbcache").apply { mkdirs() }
-        val checksum = try {
-            sdo.timeoutMs = 2000
-            node.dbChecksum()
-        } catch (e: Exception) {
-            0L
-        } finally {
-            sdo.timeoutMs = 1000
-        }
-
-        // Force fresh download by clearing existing cache for this node
-        val f = if (checksum != 0L) File(dir, "$id-$checksum.json") else File(dir, "$id-0.json")
-        runCatching { f.delete() }
-        val nodeFiles = dir.listFiles { _, name -> name.startsWith("$id-") }
-        nodeFiles?.forEach { runCatching { it.delete() } }
-
-        val db = loadDbForNode(id)
+        val db = loadDbForNode(id, forceReload = forceReload)
         if (db == null) {
             toast("Failed to fetch database for node $id")
             return@op
         }
-        _ui.update { it.copy(db = db, dbSource = "device (node $id, fresh), ${db.params.size} items") }
+        val sourceLabel = if (forceReload) "device (reloaded)" else "cached/device"
+        _ui.update { it.copy(db = db, dbSource = "node $id ($sourceLabel), ${db.params.size} items") }
     }
 
     fun loadDbFile(uri: Uri) = op {
@@ -580,6 +579,116 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         node.clearMap(dir)
         val tx = node.listMap(Direction.TX); val rx = node.listMap(Direction.RX)
         _ui.update { it.copy(mapTx = tx, mapRx = rx) }
+    }
+
+    // ---------------- Dashboard SDO Polling ----------------
+    fun startDashboardPolling(targetNodeId: Int = 3) {
+        pollJob?.cancel()
+        pollJob = viewModelScope.launch(Dispatchers.IO) {
+            _ui.update { it.copy(polling = true) }
+            val targetNames = listOf("SOC", "SOCFC", "opmode", "udc", "idc", "power", "BMS_Vmin", "BMS_Vmax", "BMS_Tmin", "BMS_Tmax", "uaux")
+            while (isActive) {
+                if (!_ui.value.connected) {
+                    delay(1000)
+                    continue
+                }
+                sdo.nodeId = targetNodeId
+                val nodeDb = _ui.value.db ?: loadDbForNode(targetNodeId)
+                if (nodeDb != null) {
+                    val acc = HashMap<String, Double>()
+                    for (name in targetNames) {
+                        val p = nodeDb.byName[name] ?: continue
+                        val v = runCatching { node.read(p) }.getOrNull()
+                        if (v != null) acc[name] = v
+                    }
+                    _ui.update { it.copy(values = it.values + acc) }
+                }
+                delay(500)
+            }
+        }
+    }
+
+    // ---------------- GitHub Stm32-VCU Releases ----------------
+    private val _ghReleases = MutableStateFlow<List<GhRelease>>(emptyList())
+    val ghReleases = _ghReleases.asStateFlow()
+
+    fun fetchGithubReleases() {
+        viewModelScope.launch(Dispatchers.IO) {
+            _ui.update { it.copy(busy = true) }
+            try {
+                val url = java.net.URL("https://api.github.com/repos/damienmaguire/Stm32-vcu/releases")
+                val conn = url.openConnection() as java.net.HttpURLConnection
+                conn.requestMethod = "GET"
+                conn.setRequestProperty("User-Agent", "OiCanTool")
+                conn.setRequestProperty("Accept", "application/vnd.github.v3+json")
+                conn.connectTimeout = 5000
+                conn.readTimeout = 5000
+
+                if (conn.responseCode == 200) {
+                    val text = conn.inputStream.bufferedReader().use { it.readText() }
+                    val array = Json.parseToJsonElement(text).jsonArray
+                    val list = ArrayList<GhRelease>()
+                    for (el in array) {
+                        val obj = el.jsonObject
+                        val tagName = obj["tag_name"]?.jsonPrimitive?.content ?: "Release"
+                        val name = obj["name"]?.jsonPrimitive?.content ?: tagName
+                        val body = obj["body"]?.jsonPrimitive?.content ?: ""
+                        val assetsArray = obj["assets"]?.jsonArray ?: continue
+                        val assetsList = ArrayList<GhReleaseAsset>()
+                        for (a in assetsArray) {
+                            val aObj = a.jsonObject
+                            val aName = aObj["name"]?.jsonPrimitive?.content ?: continue
+                            if (aName.endsWith(".bin", ignoreCase = true)) {
+                                val urlStr = aObj["browser_download_url"]?.jsonPrimitive?.content ?: continue
+                                val size = aObj["size"]?.jsonPrimitive?.content?.toLongOrNull() ?: 0L
+                                assetsList.add(GhReleaseAsset(aName, urlStr, size))
+                            }
+                        }
+                        if (assetsList.isNotEmpty()) {
+                            list.add(GhRelease(tagName, name, body, assetsList))
+                        }
+                    }
+                    _ghReleases.value = list
+                    withContext(Dispatchers.Main) { toast("Fetched ${list.size} releases from GitHub") }
+                } else {
+                    withContext(Dispatchers.Main) { toast("GitHub API error: ${conn.responseCode}") }
+                }
+            } catch (e: Exception) {
+                withContext(Dispatchers.Main) { toast("Error fetching releases: ${e.message}") }
+            } finally {
+                _ui.update { it.copy(busy = false) }
+            }
+        }
+    }
+
+    fun downloadAndUpgradeRelease(asset: GhReleaseAsset) {
+        viewModelScope.launch(Dispatchers.IO) {
+            _ui.update { it.copy(busy = true) }
+            try {
+                withContext(Dispatchers.Main) { toast("Downloading ${asset.name}...") }
+                val url = java.net.URL(asset.downloadUrl)
+                val conn = url.openConnection() as java.net.HttpURLConnection
+                conn.instanceFollowRedirects = true
+                conn.connectTimeout = 10000
+                conn.readTimeout = 15000
+
+                if (conn.responseCode in 200..308) {
+                    val bytes = conn.inputStream.use { it.readBytes() }
+                    val cacheFile = File(ctx.cacheDir, asset.name).apply { writeBytes(bytes) }
+                    val uri = Uri.fromFile(cacheFile)
+                    withContext(Dispatchers.Main) {
+                        toast("Downloaded ${asset.name} (${bytes.size} bytes). Starting upgrade...")
+                        upgradeFirmware(uri)
+                    }
+                } else {
+                    withContext(Dispatchers.Main) { toast("Download error: ${conn.responseCode}") }
+                }
+            } catch (e: Exception) {
+                withContext(Dispatchers.Main) { toast("Download failed: ${e.message}") }
+            } finally {
+                _ui.update { it.copy(busy = false) }
+            }
+        }
     }
 
     fun upgradeFirmware(uri: Uri) {
